@@ -37,12 +37,15 @@ def caption_for(pkg: ContentPackage) -> str:
     return text[:2200]
 
 
-def publish(pkg: ContentPackage, exam: Exam, video: Path, cover: Path | None = None) -> dict:
+def publish(pkg: ContentPackage, exam: Exam, video: Path, cover: Path | None = None, credits: list[str] | None = None) -> dict:
     if not settings.instagram_enabled:
         raise RuntimeError("Instagram credentials are not configured")
     token = settings.instagram_access_token
     user = settings.instagram_user_id
-    params = {"media_type": "REELS", "caption": caption_for(pkg), "share_to_feed": "true", "access_token": token}
+    caption = caption_for(pkg)
+    if credits:
+        caption = (caption + "\n\nImages: " + "; ".join(credits))[:2200]
+    params = {"media_type": "REELS", "caption": caption, "share_to_feed": "true", "access_token": token}
 
     with httpx.Client(timeout=httpx.Timeout(60, write=600, read=600)) as http:
         if settings.media_public_base_url:

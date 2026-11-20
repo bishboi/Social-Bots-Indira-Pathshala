@@ -12,15 +12,15 @@ from . import fonts
 
 LABELS = {
     "hi": dict(key_points="मुख्य बिंदु", mnemonic="याद रखने की ट्रिक", cheatsheet="चीट शीट", term="विषय", detail="तथ्य",
-               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत"),
+               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत", map="मानचित्र"),
     "en": dict(key_points="Key Points", mnemonic="Memory Trick", cheatsheet="Cheatsheet", term="Term", detail="Fact",
-               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources"),
+               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources", map="Map"),
 }
 
 _env = Environment(loader=FileSystemLoader(PACKAGE_DIR / "templates"), autoescape=select_autoescape(["html"]))
 
 
-def render_pdf(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
+def render_pdf(pkg: ContentPackage, exam: Exam, out: Path, map_png: Path | None = None) -> Path:
     from weasyprint import HTML  # imported lazily: needs system Pango
 
     script = "deva" if exam.language == "hi" or fonts.has_devanagari(pkg.title + pkg.topic) else "latin"
@@ -32,6 +32,7 @@ def render_pdf(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
         pkg=pkg, exam=exam, brand=settings.brand_name, handle=settings.brand_handle,
         lang=exam.language if exam.language != "hinglish" else "en",
         t=LABELS["hi" if exam.language == "hi" else "en"], font_faces=faces,
+        map_url=map_png.resolve().as_uri() if map_png else None,
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     (out.with_suffix(".html")).write_text(html, encoding="utf-8")

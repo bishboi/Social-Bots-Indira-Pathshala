@@ -9,7 +9,7 @@ from datetime import date
 import anthropic
 
 from .config import Exam, settings
-from .models import CONTENT_TYPES, ContentPackage
+from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ SOURCES: list of "title - url" you actually relied on"""
     return Research(notes=notes, sources=[{"title": t, "url": u} for u, t in sources.items()])
 
 
-def generate_package(exam: Exam, subject: str, content_type: str, research: Research) -> ContentPackage:
+def generate_package(exam: Exam, subject: str, content_type: str, research: Research, video_style: str = "concept_explainer") -> ContentPackage:
     """Turn research notes into every asset (quiz, short script, notes...) in one structured call."""
     src_list = "\n".join(f"- {s['title']} - {s['url']}" for s in research.sources[:25])
     system = f"""You are the head teacher and content writer of "{settings.brand_name}" ({settings.brand_handle}), an Indian exam-prep brand that posts on Telegram, Instagram Reels and YouTube Shorts.
@@ -134,13 +134,17 @@ Standards:
 - Exam-oriented: match the level, style and vocabulary of {exam.name}.
 - {LANG_RULES.get(exam.language, LANG_RULES['en'])}
 - MCQs must have exactly 4 options and exactly one correct answer; distractors should be plausible. Vary the position of the correct option.
-- Short-video slides are read on a phone in 3-5 seconds each: very few words on screen, the narration carries the explanation.
+- The short video is animated scene by scene. Each scene is on screen for 3-7 seconds: very few words on screen, the narration carries the explanation.
+- Map scenes: only name real places/districts/rivers with their official English names; coordinates and boundaries come from verified datasets, never from you. Only use map scenes when location genuinely matters.
+- Image scenes: name an English Wikipedia article whose lead photo shows the subject (a fort, monument, person, landform). Only use when a real photo adds value.
+- Formula scenes: valid LaTeX math (no $), symbols explained in 'terms'.
 - Never claim a question is a previous-year question unless the research notes show it is."""
 
     user = f"""Exam: {exam.name} ({exam.short_name})
 Audience: {exam.audience}
 Subject: {subject}
 Format: {content_type} - {CONTENT_TYPES[content_type]}
+Video style: {video_style} - {VIDEO_STYLES.get(video_style, "")}
 
 RESEARCH NOTES
 {research.notes}
@@ -167,6 +171,7 @@ Create the complete content package for this topic."""
     if pkg is None:
         raise RuntimeError("Generation returned no structured output")
     pkg.content_type = content_type  # type: ignore[assignment]
+    pkg.short.style = video_style
     return sanitize(pkg)
 
 
@@ -184,5 +189,11 @@ def sanitize(pkg: ContentPackage) -> ContentPackage:
         clean.append(q)
     pkg.mcqs = clean
     pkg.short.title = pkg.short.title[:95]
+    for sc in pkg.short.scenes:
+        sc.options = [o.strip() for o in sc.options if o.strip()][:4]
+        if sc.correct_index is not None and not 0 <= sc.correct_index < max(1, len(sc.options)):
+            sc.correct_index = None
+        if sc.kind == "map" and sc.map is None:
+            sc.kind = "bullets"  # type: ignore[assignment]
     pkg.short.hashtags = [h.lstrip("#").replace(" ", "") for h in pkg.short.hashtags if h.strip()][:15]
     return pkg

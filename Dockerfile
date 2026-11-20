@@ -1,8 +1,11 @@
 FROM python:3.12-slim
 
-# ffmpeg for video, Pango for WeasyPrint PDFs (HarfBuzz shaping for Hindi)
+# ffmpeg: video; Pango/Cairo: WeasyPrint PDFs + Manim text (HarfBuzz shaping for Hindi);
+# LaTeX + dvisvgm: Manim formula rendering (JEE/NEET formula reels)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b fontconfig \
+        ffmpeg fontconfig build-essential pkg-config \
+        libcairo2-dev libpango1.0-dev libharfbuzz0b \
+        texlive-latex-base texlive-latex-recommended texlive-fonts-recommended dvisvgm \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

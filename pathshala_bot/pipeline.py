@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import Exam, load_exams, settings
-from .models import CONTENT_TYPES, ContentPackage
+from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage
 from .store import History
 
 log = logging.getLogger(__name__)
@@ -31,6 +31,8 @@ TYPE_WEIGHTS = {
 # Formats that don't fit an exam's subjects get skipped.
 FORMULA_SUBJECTS = re.compile(r"physics|chem|math|quant|reasoning|भौतिक|रसायन", re.I)
 CURRENT_AFFAIRS_EXAMS = {"rajasthan-si", "ssc-cgl", "reet"}
+GEO_SUBJECTS = re.compile(r"geograph|भूगोल|\bgk\b|general awareness|environment|ecology", re.I)
+HISTORY_SUBJECTS = re.compile(r"histor|इतिहास|national movement|culture", re.I)
 
 
 @dataclass
@@ -41,6 +43,8 @@ class RunResult:
     assets: dict[str, Path] = field(default_factory=dict)
     published: dict = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
+    credits: list[str] = field(default_factory=list)
+    video_style: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -50,6 +54,7 @@ class RunResult:
         lines = [f"Run: {self.run_dir}", f"Exam: {self.exam.name}"]
         if self.package:
             lines += [f"Topic: {self.package.topic} ({self.package.content_type})", f"MCQs: {len(self.package.mcqs)}"]
+            lines.append(f"Video style: {self.video_style or self.package.short.style}")
         lines += [f"Asset {k}: {v}" for k, v in self.assets.items()]
         for k, v in self.published.items():
             url = v.get("url") if isinstance(v, dict) else None
@@ -79,12 +84,45 @@ def pick_type(exam: Exam, subject: str, rng: random.Random) -> str:
     return rng.choices(list(weights), weights=list(weights.values()))[0]
 
 
-def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult, make_video: bool = True) -> None:
+def pick_style(exam: Exam, subject: str, content_type: str, rng: random.Random) -> str:
+    """Choose a video style that suits the topic, with some variety."""
+    geo_subj, hist_subj, formula_subj = bool(GEO_SUBJECTS.search(subject)), bool(HISTORY_SUBJECTS.search(subject)), bool(FORMULA_SUBJECTS.search(subject))
+    options: dict[str, float] = {"concept_explainer": 1}
+    if content_type == "pyq_quiz":
+        options.update(quiz_countdown=4)
+    if content_type in ("cheatsheet", "current_affairs", "mnemonic_trick"):
+        options.update(top_facts=3)
+    if content_type in ("formula_sheet", "concept_explainer") and formula_subj:
+        options.update(formula_breakdown=4)
+    if geo_subj:
+        options.update(map_story=4)
+    if hist_subj:
+        options.update(timeline=3, map_story=options.get("map_story", 0) + 1.5)
+    return rng.choices(list(options), weights=list(options.values()))[0]
+
+
+def _map_figure(pkg: ContentPackage, exam: Exam, run_dir: Path) -> Path | None:
+    from . import geo
+
+    sc = next((s for s in pkg.short.scenes if s.kind == "map" and s.map), None)
+    if not sc:
+        return None
+    try:
+        return geo.render_map_png(sc.map, run_dir / "map.png", title=sc.heading, language=exam.language)
+    except Exception:
+        log.exception("map figure failed")
+        return None
+
+
+def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult, make_video: bool = True, style: str | None = None) -> None:
     from .render import images, pdf, video
 
+    map_png = _map_figure(pkg, exam, run_dir)
+    if map_png:
+        result.assets["map"] = map_png
     steps = [
         ("card", lambda: images.render_card(pkg, exam, run_dir / "card.png")),
-        ("pdf", lambda: pdf.render_pdf(pkg, exam, run_dir / "notes.pdf")),
+        ("pdf", lambda: pdf.render_pdf(pkg, exam, run_dir / "notes.pdf", map_png=map_png)),
     ]
     for name, fn in steps:
         try:
@@ -94,8 +132,10 @@ def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult
             result.errors[name] = traceback.format_exc()
     if make_video:
         try:
-            slides = images.render_slides(pkg, exam, run_dir / "slides")
-            result.assets["video"] = video.build_short(pkg, slides, run_dir, exam.language)
+            path, credits, used = video.build_short(pkg, exam, run_dir, style=style)
+            result.assets["video"] = path
+            result.credits += credits
+            result.video_style = used
         except Exception:
             log.exception("video render failed")
             result.errors["video"] = traceback.format_exc()
@@ -112,7 +152,7 @@ def publish_all(pkg: ContentPackage, exam: Exam, result: RunResult, platforms: s
             result.errors["youtube"] = "skipped: no video"
         else:
             try:
-                result.published["youtube"] = youtube.publish(pkg, exam, result.assets["video"])
+                result.published["youtube"] = youtube.publish(pkg, exam, result.assets["video"], credits=result.credits)
             except Exception:
                 log.exception("youtube publish failed")
                 result.errors["youtube"] = traceback.format_exc()
@@ -123,7 +163,7 @@ def publish_all(pkg: ContentPackage, exam: Exam, result: RunResult, platforms: s
             result.errors["instagram"] = "skipped: no video"
         else:
             try:
-                result.published["instagram"] = instagram.publish(pkg, exam, result.assets["video"], result.assets.get("card"))
+                result.published["instagram"] = instagram.publish(pkg, exam, result.assets["video"], result.assets.get("card"), credits=result.credits)
             except Exception:
                 log.exception("instagram publish failed")
                 result.errors["instagram"] = traceback.format_exc()
@@ -147,6 +187,7 @@ def run(
     from_json: Path | None = None,
     make_video: bool = True,
     seed: int | None = None,
+    video_style: str | None = None,
 ) -> RunResult:
     """Run the full pipeline once. `platforms=None/empty` is a dry run (render only)."""
     from . import llm
@@ -169,12 +210,16 @@ def run(
             raise KeyError(f"Unknown content type '{content_type}'. Known: {', '.join(CONTENT_TYPES)}")
         content_type = content_type or pick_type(exam, subject, rng)
         pkg = None
+    if video_style and video_style not in VIDEO_STYLES:
+        raise KeyError(f"Unknown video style '{video_style}'. Known: {', '.join(VIDEO_STYLES)}")
+    if not from_json:
+        video_style = video_style or pick_style(exam, subject, content_type, rng)
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = settings.output_dir / f"{stamp}_{exam.id}_{content_type}"
     run_dir.mkdir(parents=True, exist_ok=True)
     result = RunResult(run_dir=run_dir, exam=exam)
-    log.info("run %s: exam=%s subject=%s type=%s", run_dir.name, exam.id, subject, content_type)
+    log.info("run %s: exam=%s subject=%s type=%s video=%s", run_dir.name, exam.id, subject, content_type, video_style or "from json")
 
     if pkg is None:
         try:
@@ -186,7 +231,7 @@ def run(
             _finish(result, history, subject, None, content_type)
             return result
         try:
-            pkg = llm.generate_package(exam, subject, content_type, research)
+            pkg = llm.generate_package(exam, subject, content_type, research, video_style)
         except Exception:
             log.exception("generation failed")
             result.errors["generate"] = traceback.format_exc()
@@ -195,7 +240,7 @@ def run(
 
     result.package = pkg
     (run_dir / "content.json").write_text(pkg.model_dump_json(indent=2), encoding="utf-8")
-    render_all(pkg, exam, run_dir, result, make_video=make_video)
+    render_all(pkg, exam, run_dir, result, make_video=make_video, style=video_style)
     if platforms:
         publish_all(pkg, exam, result, platforms, chat_id=chat_id)
     _finish(result, history, subject, pkg.topic, content_type)
@@ -208,6 +253,8 @@ def _finish(result: RunResult, history: History, subject: str, topic: str | None
         "subject": subject,
         "topic": topic,
         "content_type": content_type,
+        "video_style": result.video_style,
+        "credits": result.credits,
         "assets": {k: str(v) for k, v in result.assets.items()},
         "published": result.published,
         "errors": result.errors,

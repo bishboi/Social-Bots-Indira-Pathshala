@@ -55,6 +55,11 @@
   {% if s.bullets %}<ul>{% for b in s.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
   {% endfor %}
 
+  {% if map_url %}
+  <h2>{{ t.map }}</h2>
+  <div class="box" style="text-align:center"><img src="{{ map_url }}" style="width:80%"></div>
+  {% endif %}
+
   {% if pkg.mnemonic %}
   <h2>{{ t.mnemonic }}</h2>
   <div class="mnemonic">{{ pkg.mnemonic }}</div>

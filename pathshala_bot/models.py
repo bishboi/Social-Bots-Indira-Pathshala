@@ -39,17 +39,71 @@ class CheatRow(BaseModel):
     detail: str = Field(description="The fact, value or formula itself, one line.")
 
 
-class Slide(BaseModel):
-    kind: Literal["hook", "concept", "question", "answer", "tip", "cta"]
-    heading: str = Field(description="Big on-screen heading, max 6 words.")
-    body: str = Field(description="On-screen text, max 30 words. For 'question' slides, the question with options on separate lines 'A. ...'.")
-    narration: str = Field(description="What the voice-over says while this slide is shown, 1-3 short spoken sentences.")
+VIDEO_STYLES: dict[str, str] = {
+    "quiz_countdown": "Quiz reel: hook -> 1-2 quiz scenes (on-screen countdown) each followed by a reveal -> short explanation -> cta.",
+    "map_story": "Map explainer: hook -> 2-4 map scenes that highlight states / districts / rivers / places on an accurate map -> bullets or fact -> quiz -> reveal -> cta.",
+    "timeline": "History timeline: hook -> 1-2 timeline scenes (3-6 dated events each) -> optional map or image -> quiz -> reveal -> cta.",
+    "formula_breakdown": "Formula reel: hook -> 1-3 formula scenes (LaTeX + meaning of each symbol) -> bullets with a worked example -> quiz -> reveal -> cta.",
+    "top_facts": "Countdown of facts: hook -> 3-5 fact scenes (one striking fact each, big number/keyword) -> cta.",
+    "concept_explainer": "Concept explainer: hook -> bullets / comparison / image scenes building the idea step by step -> quiz -> reveal -> cta.",
+    "slideshow": "Simple static slides: hook -> 3-5 bullets/fact scenes -> quiz -> reveal -> cta.",
+}
+
+SceneKind = Literal["title", "bullets", "fact", "quiz", "reveal", "timeline", "map", "formula", "comparison", "image", "cta"]
+
+
+class MapPlace(BaseModel):
+    name: str = Field(description="Official English name exactly as on Wikipedia / maps, e.g. 'Ranthambore National Park', 'Sambhar Lake', 'Kalibangan'. Coordinates are looked up from a gazetteer - never give coordinates.")
+    label: str = Field(description="Short on-screen label in the content language, max 3 words.")
+    kind: Literal["city", "park", "fort", "lake", "dam", "mountain", "site", "other"]
+
+
+class MapSpec(BaseModel):
+    focus_state: str | None = Field(default=None, description="Indian state/UT to zoom into, English name e.g. 'Rajasthan'. Null shows all of India.")
+    highlight_states: list[str] = Field(default_factory=list, description="States/UTs to colour (English names).")
+    highlight_districts: list[str] = Field(default_factory=list, description="Districts of focus_state to colour (English names, Census 2011 districts only).")
+    rivers: list[str] = Field(default_factory=list, description="Major rivers to draw, English names e.g. 'Chambal', 'Banas', 'Mahi', 'Ganges'.")
+    places: list[MapPlace] = Field(default_factory=list, description="0-6 places to pin, in the order they should appear.")
+
+
+class TimelineEvent(BaseModel):
+    date: str = Field(description="Date or year as it should appear, e.g. '18 Mar 1948' or '1857'.")
+    label: str = Field(description="What happened, max 8 words.")
+
+
+class Term(BaseModel):
+    symbol: str = Field(description="Symbol as plain text, e.g. 'I_cm' or 'M'.")
+    meaning: str = Field(description="Meaning, max 8 words.")
+
+
+class ComparisonRow(BaseModel):
+    left: str
+    right: str
+
+
+class Scene(BaseModel):
+    kind: SceneKind
+    heading: str = Field(description="On-screen heading, max 6 words.")
+    body: str = Field(default="", description="Optional on-screen text, max 25 words (for quiz: the question).")
+    narration: str = Field(description="Voice-over for this scene, 1-3 short spoken sentences. Spell out numbers/symbols the way a teacher would say them.")
+    bullets: list[str] = Field(default_factory=list, description="bullets/fact scenes: 2-4 items, max 8 words each. For 'fact', the first item is the big number or keyword.")
+    options: list[str] = Field(default_factory=list, description="quiz scenes: exactly 4 options, max 6 words each.")
+    correct_index: int | None = Field(default=None, description="quiz and reveal scenes: 0-based index of the correct option.")
+    events: list[TimelineEvent] = Field(default_factory=list, description="timeline scenes: 3-6 events in chronological order.")
+    map: MapSpec | None = Field(default=None, description="map scenes only.")
+    latex: str | None = Field(default=None, description="formula scenes: the formula in LaTeX math mode without $ delimiters, e.g. 'I = I_{cm} + Md^2'.")
+    terms: list[Term] = Field(default_factory=list, description="formula scenes: meaning of each symbol (2-4).")
+    left_title: str | None = Field(default=None, description="comparison scenes: left column title.")
+    right_title: str | None = Field(default=None, description="comparison scenes: right column title.")
+    rows: list[ComparisonRow] = Field(default_factory=list, description="comparison scenes: 2-5 rows.")
+    image_topic: str | None = Field(default=None, description="image scenes: exact English Wikipedia article title whose lead photo should be shown, e.g. 'Chittor Fort'.")
 
 
 class ShortVideo(BaseModel):
+    style: str = Field(description="The video style requested in the prompt.")
     title: str = Field(description="YouTube Shorts title, max 80 characters, curiosity-driven, includes the exam name.")
-    slides: list[Slide] = Field(
-        description="6-9 slides for a 30-55 second vertical video: start with a hook, end with a call-to-action to follow / join Telegram."
+    scenes: list[Scene] = Field(
+        description="6-10 scenes for a 30-55 second vertical video following the requested style. Start with a hook ('title' kind), end with 'cta'."
     )
     caption: str = Field(description="Instagram / YouTube description, 2-4 lines, no hashtags.")
     hashtags: list[str] = Field(description="8-15 hashtags without '#', mix of exam-specific and broad education tags.")

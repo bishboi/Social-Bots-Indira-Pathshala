@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from ..config import Exam, settings
-from ..models import ContentPackage, Slide
+from ..models import ContentPackage, Scene
 from . import fonts
 
 W, H = 1080, 1920
@@ -19,21 +19,34 @@ WHITE = (255, 255, 255)
 MUTED = (190, 196, 220)
 SAFFRON = (255, 153, 51)
 ACCENTS = {
-    "hook": SAFFRON,
-    "concept": (90, 200, 250),
-    "question": (255, 214, 10),
-    "answer": (52, 199, 89),
-    "tip": (255, 105, 180),
-    "cta": SAFFRON,
+    "title": SAFFRON, "bullets": (90, 200, 250), "fact": (255, 214, 10), "quiz": (255, 214, 10), "reveal": (52, 199, 89),
+    "timeline": SAFFRON, "map": (90, 200, 250), "formula": (255, 105, 180), "comparison": (90, 200, 250),
+    "image": SAFFRON, "cta": SAFFRON,
 }
 KIND_LABEL = {
-    "hook": "DID YOU KNOW?",
-    "concept": "CONCEPT",
-    "question": "QUESTION",
-    "answer": "ANSWER",
-    "tip": "EXAM TIP",
+    "title": "DID YOU KNOW?", "bullets": "KEY POINTS", "fact": "FACT", "quiz": "QUESTION", "reveal": "ANSWER",
+    "timeline": "TIMELINE", "map": "ON THE MAP", "formula": "FORMULA", "comparison": "COMPARE", "image": "LOOK",
     "cta": "FOLLOW",
 }
+
+
+def scene_text(sc: Scene) -> str:
+    """Flatten any scene kind into on-screen text for a static slide."""
+    parts = [sc.body] if sc.body else []
+    if sc.kind in ("quiz", "reveal") and sc.options:
+        parts.append("\n".join(f"{'ABCD'[i]}. {o}" + (" ✓" if sc.kind == "reveal" and i == sc.correct_index else "") for i, o in enumerate(sc.options[:4])))
+    if sc.bullets:
+        parts.append("\n".join(f"• {b}" for b in sc.bullets))
+    if sc.events:
+        parts.append("\n".join(f"{e.date} – {e.label}" for e in sc.events))
+    if sc.latex:
+        parts.append(sc.latex.replace("\\", "").replace("{", "").replace("}", ""))
+    if sc.terms:
+        parts.append("\n".join(f"{t.symbol}: {t.meaning}" for t in sc.terms))
+    if sc.rows:
+        head = f"{sc.left_title or ''} | {sc.right_title or ''}\n" if (sc.left_title or sc.right_title) else ""
+        parts.append(head + "\n".join(f"{r.left} | {r.right}" for r in sc.rows))
+    return "\n".join(p for p in parts if p).strip()
 
 # Emoji / pictographs: the slide fonts have no glyphs for them.
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿️‍]")
@@ -108,7 +121,7 @@ def _chip(draw, xy, text, fill, fg, language, size=34):
     return x + tw + 48
 
 
-def render_slide(slide: Slide, idx: int, total: int, exam: Exam, out: Path) -> Path:
+def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> Path:
     lang = exam.language
     img = _gradient(W, H)
     d = ImageDraw.Draw(img)
@@ -133,7 +146,20 @@ def render_slide(slide: Slide, idx: int, total: int, exam: Exam, out: Path) -> P
     y = draw_lines(d, hlines, hfont, 80, 400, hlh, WHITE)
 
     # body card: sized to its text, centred in the space between heading and footer
-    body = clean(slide.body)
+    if slide.kind == "map" and slide.map:
+        from .. import geo
+
+        try:
+            png = geo.render_map_png(slide.map, out.with_name(out.stem + "_map.png"), width=960, language=lang)
+            m = Image.open(png).convert("RGB")
+            img.paste(m, (60, int(y + 60)))
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _footer(d, accent)
+            img.save(out, "PNG", optimize=True)
+            return out
+        except Exception:
+            pass
+    body = clean(scene_text(slide))
     pad = 64
     area_top, area_bottom = y + 70, H - 300
     bfont, blines, blh = fit_text(d, body, W - 120 - 2 * pad, area_bottom - area_top - 2 * pad, "regular", lang, start=76, minimum=36, spacing=1.45)
@@ -148,21 +174,23 @@ def render_slide(slide: Slide, idx: int, total: int, exam: Exam, out: Path) -> P
     by = card[1] + (card_h - len(blines) * blh) // 2
     draw_lines(d, blines, bfont, card[0] + pad, by, blh, WHITE)
 
-    # footer
+    _footer(d, accent)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out, "PNG", optimize=True)
+    return out
+
+
+def _footer(d, accent) -> None:
     foot = f"Join Telegram  {settings.brand_handle}"
     ffont = font_for(foot, 40, "bold", "en")
     fw = d.textlength(foot, font=ffont)
     d.rounded_rectangle(((W - fw) / 2 - 40, H - 220, (W + fw) / 2 + 40, H - 140), radius=40, fill=accent)
     d.text(((W - fw) / 2, H - 205), foot, font=ffont, fill=BG_TOP)
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out, "PNG", optimize=True)
-    return out
-
 
 def render_slides(pkg: ContentPackage, exam: Exam, out_dir: Path) -> list[Path]:
-    total = len(pkg.short.slides)
-    return [render_slide(s, i, total, exam, out_dir / f"slide_{i + 1:02d}.png") for i, s in enumerate(pkg.short.slides)]
+    total = len(pkg.short.scenes)
+    return [render_slide(s, i, total, exam, out_dir / f"slide_{i + 1:02d}.png") for i, s in enumerate(pkg.short.scenes)]
 
 
 def render_card(pkg: ContentPackage, exam: Exam, out: Path) -> Path:

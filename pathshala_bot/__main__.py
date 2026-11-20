@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from .config import load_exams
-from .models import CONTENT_TYPES
+from .models import CONTENT_TYPES, VIDEO_STYLES
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--publish", default="", help="comma list: telegram,youtube,instagram or 'all'. Empty = dry run")
     r.add_argument("--chat", help="override Telegram chat id")
     r.add_argument("--from-json", type=Path, help="skip research/generation and use an existing content.json")
+    r.add_argument("--video-style", choices=list(VIDEO_STYLES), help="short video style (default: chosen to fit the topic)")
     r.add_argument("--no-video", action="store_true", help="skip the short video")
     r.add_argument("--seed", type=int, help="random seed for reproducible picks")
 
@@ -57,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"unknown platform(s): {', '.join(unknown)}")
     result = pipeline.run(
         exam_id=a.exam, content_type=a.type, subject=a.subject, platforms=platforms, chat_id=a.chat,
-        from_json=a.from_json, make_video=not a.no_video, seed=a.seed,
+        from_json=a.from_json, make_video=not a.no_video, seed=a.seed, video_style=a.video_style,
     )
     print("\n" + result.summary())
     return 0 if result.ok else 1

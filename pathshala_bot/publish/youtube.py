@@ -38,7 +38,7 @@ def access_token() -> str:
     return r.json()["access_token"]
 
 
-def publish(pkg: ContentPackage, exam: Exam, video: Path) -> dict:
+def publish(pkg: ContentPackage, exam: Exam, video: Path, credits: list[str] | None = None) -> dict:
     if not settings.youtube_enabled:
         raise RuntimeError("YouTube credentials are not configured")
     token = access_token()
@@ -49,6 +49,12 @@ def publish(pkg: ContentPackage, exam: Exam, video: Path) -> dict:
         + "\n".join(f"✅ {p}" for p in pkg.key_points[:5])
         + f"\n\n📚 Free PDF notes & daily quizzes on Telegram: {settings.brand_handle}\n\n{hashtags} #Shorts"
     )
+    if any(sc.kind == "map" for sc in pkg.short.scenes):
+        from ..geo import ATTRIBUTION
+
+        description += f"\n\n{ATTRIBUTION}"
+    if credits:
+        description += "\nImages: " + "; ".join(credits)
     meta = {
         "snippet": {
             "title": title[:100],

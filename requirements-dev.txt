@@ -1,0 +1,2 @@
+pyshp>=2.3  # only for scripts\/build_geodata.py
+pytest>=8

@@ -1,0 +1,197 @@
+{
+  "title": "Moment of Inertia: Parallel Axis Theorem",
+  "subject": "Physics",
+  "topic": "Parallel axis theorem and standard moments of inertia",
+  "content_type": "formula_sheet",
+  "hook": "One formula that turns 10 JEE rotation questions into 1-liners.",
+  "telegram_post": "🌀 <b>Parallel Axis Theorem</b>\n\n<code>I = I_cm + Md²</code>\n\n• Works for <b>any</b> body, axis must be parallel to one through the centre of mass\n• Rod about end: ML²/12 + M(L/2)² = <b>ML²/3</b>\n• Ring about tangent (in plane): MR²/2 + MR² = <b>3MR²/2</b>",
+  "key_points": [
+    "I = I_cm + Md² for any axis parallel to an axis through the centre of mass.",
+    "d is the perpendicular distance between the two parallel axes.",
+    "I is minimum about the axis through the centre of mass.",
+    "Rod about centre: ML²/12; about end: ML²/3.",
+    "Ring: MR²; disc: MR²/2 about the central perpendicular axis.",
+    "Solid sphere: 2MR²/5; hollow sphere: 2MR²/3 about a diameter."
+  ],
+  "cheatsheet": [
+    {
+      "term": "Parallel axis",
+      "detail": "I = I_cm + Md²"
+    },
+    {
+      "term": "Perpendicular axis (laminas)",
+      "detail": "I_z = I_x + I_y"
+    },
+    {
+      "term": "Thin rod, centre",
+      "detail": "ML²/12"
+    },
+    {
+      "term": "Thin rod, end",
+      "detail": "ML²/3"
+    },
+    {
+      "term": "Ring, central axis",
+      "detail": "MR²"
+    },
+    {
+      "term": "Disc, central axis",
+      "detail": "MR²/2"
+    },
+    {
+      "term": "Solid sphere, diameter",
+      "detail": "2MR²/5"
+    },
+    {
+      "term": "Hollow sphere, diameter",
+      "detail": "2MR²/3"
+    }
+  ],
+  "mnemonic": null,
+  "mcqs": [
+    {
+      "question": "Moment of inertia of a thin uniform rod of mass M and length L about an axis through one end, perpendicular to the rod, is:",
+      "options": [
+        "ML²/12",
+        "ML²/3",
+        "ML²/4",
+        "ML²/2"
+      ],
+      "correct_index": 1,
+      "explanation": "I = ML²/12 + M(L/2)² = ML²/3 by the parallel axis theorem.",
+      "difficulty": "easy",
+      "pyq_reference": null
+    },
+    {
+      "question": "Moment of inertia of a solid sphere (mass M, radius R) about a tangent is:",
+      "options": [
+        "2MR²/5",
+        "7MR²/5",
+        "3MR²/5",
+        "5MR²/3"
+      ],
+      "correct_index": 1,
+      "explanation": "I = 2MR²/5 + MR² = 7MR²/5.",
+      "difficulty": "medium",
+      "pyq_reference": null
+    }
+  ],
+  "short": {
+    "style": "formula_breakdown",
+    "title": "Parallel Axis Theorem in 40 seconds | JEE Main",
+    "scenes": [
+      {
+        "kind": "title",
+        "heading": "One formula, 10 questions",
+        "body": "Parallel axis theorem for JEE",
+        "narration": "This one formula solves a huge chunk of JEE rotation questions."
+      },
+      {
+        "kind": "formula",
+        "heading": "Parallel axis theorem",
+        "latex": "I = I_{cm} + M d^{2}",
+        "terms": [
+          {
+            "symbol": "I_cm",
+            "meaning": "MI about axis through centre of mass"
+          },
+          {
+            "symbol": "M",
+            "meaning": "total mass of the body"
+          },
+          {
+            "symbol": "d",
+            "meaning": "distance between the parallel axes"
+          }
+        ],
+        "narration": "I equals I c m plus M d squared. I c m is about the centre of mass axis, and d is the distance between the two parallel axes."
+      },
+      {
+        "kind": "comparison",
+        "heading": "Use it fast",
+        "left_title": "About centre",
+        "right_title": "Shifted axis",
+        "rows": [
+          {
+            "left": "Rod: ML²/12",
+            "right": "End: ML²/3"
+          },
+          {
+            "left": "Sphere: 2MR²/5",
+            "right": "Tangent: 7MR²/5"
+          },
+          {
+            "left": "Ring: MR²",
+            "right": "Tangent ⊥: 2MR²"
+          }
+        ],
+        "narration": "Rod about its centre is M L squared by twelve, about its end it becomes M L squared by three. A solid sphere about a tangent is seven by five M R squared."
+      },
+      {
+        "kind": "quiz",
+        "heading": "Quick check",
+        "body": "Rod (M, L) about one end, perpendicular. I = ?",
+        "options": [
+          "ML²/12",
+          "ML²/3",
+          "ML²/4",
+          "ML²/2"
+        ],
+        "correct_index": 1,
+        "narration": "Quick check. Moment of inertia of a rod about one end?"
+      },
+      {
+        "kind": "reveal",
+        "heading": "Answer: ML²/3",
+        "body": "ML²/12 + M(L/2)² = ML²/3",
+        "correct_index": 1,
+        "narration": "It's M L squared by three. Twelfth plus a quarter gives one third."
+      },
+      {
+        "kind": "cta",
+        "heading": "Daily JEE formulas",
+        "body": "Free PDF notes on Telegram",
+        "narration": "Follow for a new JEE formula every day, and grab the free notes on Telegram."
+      }
+    ],
+    "caption": "Parallel axis theorem with the standard results you must know for JEE Main.",
+    "hashtags": [
+      "JEEMain",
+      "JEE2027",
+      "Physics",
+      "RotationalMotion",
+      "IITJEE",
+      "JEEPhysics",
+      "NEET",
+      "StudyTips"
+    ]
+  },
+  "notes": [
+    {
+      "heading": "Statement",
+      "paragraphs": [
+        "The moment of inertia about any axis equals the moment of inertia about a parallel axis through the centre of mass plus Md², where d is the perpendicular distance between the axes."
+      ],
+      "bullets": [
+        "Valid for any rigid body (2D or 3D).",
+        "One of the two axes must pass through the centre of mass."
+      ]
+    },
+    {
+      "heading": "Standard results",
+      "paragraphs": [],
+      "bullets": [
+        "Rod about end: ML²/3",
+        "Solid sphere about tangent: 7MR²/5",
+        "Ring about tangent perpendicular to plane: 2MR²",
+        "Disc about tangent in plane: 5MR²/4"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "NCERT Physics Part 1, Chapter 6 (System of Particles and Rotational Motion)",
+      "url": "https://ncert.nic.in/textbook.php"
+    }
+  ]
+}

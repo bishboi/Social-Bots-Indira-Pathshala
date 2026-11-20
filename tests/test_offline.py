@@ -69,7 +69,7 @@ def test_render_card_and_slides(pkg, exam, tmp_path):
     card = images.render_card(pkg, exam, tmp_path / "card.png")
     slides = images.render_slides(pkg, exam, tmp_path / "slides")
     assert card.stat().st_size > 10_000
-    assert len(slides) == len(pkg.short.slides)
+    assert len(slides) == len(pkg.short.scenes)
     from PIL import Image
 
     assert Image.open(slides[0]).size == (1080, 1920)
@@ -117,3 +117,89 @@ def test_pipeline_from_json_dry_run(tmp_path, monkeypatch):
     assert res.ok
     manifest = json.loads((res.run_dir / "manifest.json").read_text())
     assert manifest["topic"] and "card" in manifest["assets"]
+
+
+# ---------- maps, styles, scenes ----------
+
+GEO_FIXTURE = Path(__file__).parent / "fixtures" / "rajasthan_geo_map_sample.json"
+JEE_FIXTURE = Path(__file__).parent / "fixtures" / "jee_formula_sample.json"
+
+
+def test_all_fixtures_validate():
+    for f in (FIXTURE, GEO_FIXTURE, JEE_FIXTURE):
+        p = ContentPackage.model_validate_json(f.read_text(encoding="utf-8"))
+        assert p.short.style in __import__("pathshala_bot.models", fromlist=["x"]).VIDEO_STYLES
+        assert p.short.scenes[0].kind == "title" and p.short.scenes[-1].kind == "cta"
+
+
+def test_geo_resolves_districts_and_places():
+    from pathshala_bot import geo
+    from pathshala_bot.models import MapPlace, MapSpec
+
+    rm = geo.resolve(MapSpec(focus_state="Rajasthan", highlight_districts=["Alwar", "Dholpur", "Chittorgarh"],
+                             rivers=["Chambal"], places=[MapPlace(name="Bharatpur", label="x", kind="city")]))
+    assert rm.focus["name"] == "Rajasthan"
+    assert len(rm.focus_districts) == 33  # Census 2011 districts
+    assert {d["name"] for d in rm.highlight_districts} == {"Alwar", "Dhaulpur", "Chittaurgarh"}
+    assert rm.rivers
+    bharatpur = rm.points[0]
+    assert abs(bharatpur.lat - 27.22) < 0.05 and abs(bharatpur.lon - 77.49) < 0.05  # the city, not the district centroid
+
+
+def test_geocode_rejects_places_outside_focus_state(monkeypatch):
+    from pathshala_bot import geo, resources
+    from pathshala_bot.models import MapPlace
+
+    monkeypatch.setattr(resources, "wiki_summary", lambda *a, **k: None)
+    assert geo.geocode(MapPlace(name="Chennai", label="x", kind="city"), "Rajasthan") is None
+    assert geo.geocode(MapPlace(name="Zzzqx Imaginary Fort", label="x", kind="fort")) is None
+
+
+def test_india_boundary_includes_ladakh_and_jk():
+    from pathshala_bot import geo
+
+    names = {s["name"] for s in geo.states()}
+    assert {"Ladakh", "Jammu & Kashmir", "Rajasthan"} <= names
+    x0, y0, x1, y1 = geo.bbox(geo.find_state("Ladakh")["rings"])
+    assert y1 > 35.5  # official boundary extends to the Karakoram
+
+
+def test_pick_style_fits_subject():
+    import random
+
+    exams = load_exams()
+    rng = random.Random(3)
+    geo_styles = {pipeline.pick_style(exams["rajasthan-si"], "Rajasthan Geography", "concept_explainer", rng) for _ in range(60)}
+    assert "map_story" in geo_styles
+    phys = {pipeline.pick_style(exams["jee-main"], "Physics", "formula_sheet", rng) for _ in range(60)}
+    assert "formula_breakdown" in phys and "map_story" not in phys and "timeline" not in phys
+
+
+def test_reveal_inherits_quiz_options():
+    from pathshala_bot.render.video import normalize_scenes
+
+    p = ContentPackage.model_validate_json(GEO_FIXTURE.read_text(encoding="utf-8"))
+    normalize_scenes(p)
+    reveal = next(s for s in p.short.scenes if s.kind == "reveal")
+    assert len(reveal.options) == 4 and reveal.correct_index == 2
+
+
+def test_static_map_png(tmp_path):
+    from pathshala_bot import geo
+
+    p = ContentPackage.model_validate_json(GEO_FIXTURE.read_text(encoding="utf-8"))
+    spec = next(s.map for s in p.short.scenes if s.kind == "map" and s.map.focus_state)
+    out = geo.render_map_png(spec, tmp_path / "map.png", language="hi")
+    assert out.stat().st_size > 20_000
+
+
+def test_manim_render_smoke(tmp_path, monkeypatch):
+    pytest.importorskip("manim")
+    from pathshala_bot.render import video
+
+    p = ContentPackage.model_validate_json(GEO_FIXTURE.read_text(encoding="utf-8"))
+    p.short.scenes = [s for s in p.short.scenes if s.kind in ("title", "map", "quiz")][:3]
+    monkeypatch.setenv("MANIM_FPS", "6")
+    plan = [{"audio": None, "seconds": 3.0} for _ in p.short.scenes]
+    out = video.render_manim(p, load_exams()["rajasthan-si"], plan, tmp_path)
+    assert video.duration(out) == pytest.approx(9.0, abs=0.6)
