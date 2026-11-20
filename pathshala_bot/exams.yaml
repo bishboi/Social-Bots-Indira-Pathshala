@@ -1,0 +1,176 @@
+# Target exams the pipeline picks from.
+#
+#   id            short id used on the CLI / bot (`/generate rajasthan-si`)
+#   language      hi | en | hinglish  -> language of every generated asset
+#   weight        relative chance of being picked on a random run
+#   telegram_chat optional per-exam channel (falls back to TELEGRAM_CHANNEL_ID)
+#   subjects      subject -> seed topics. Research starts from a random seed and
+#                 searches the web for a specific, high-yield sub-topic of it.
+
+exams:
+  - id: rajasthan-si
+    name: "Rajasthan Police Sub-Inspector (RPSC SI)"
+    short_name: "Rajasthan SI"
+    language: hi
+    weight: 3
+    audience: "Graduates preparing for RPSC Sub-Inspector / Platoon Commander exam"
+    subjects:
+      "Rajasthan History & Culture":
+        - "Prehistoric sites of Rajasthan (Kalibangan, Ahar, Ganeshwar, Bairath)"
+        - "Rajput dynasties: Guhil, Chauhan, Rathore, Kachhwaha"
+        - "1857 revolt and peasant/tribal movements in Rajasthan"
+        - "Integration of Rajasthan (7 stages)"
+        - "Folk deities, fairs and festivals of Rajasthan"
+        - "Folk dances, music and musical instruments of Rajasthan"
+        - "Forts, palaces and painting schools of Rajasthan"
+      "Rajasthan Geography":
+        - "Physiographic divisions of Rajasthan"
+        - "Rivers, lakes and irrigation projects of Rajasthan"
+        - "Minerals and energy resources of Rajasthan"
+        - "Wildlife sanctuaries and national parks of Rajasthan"
+        - "Climate, soils and agriculture of Rajasthan"
+      "Indian Polity & Rajasthan Administration":
+        - "Fundamental Rights and Directive Principles"
+        - "Governor, Chief Minister and State Legislature of Rajasthan"
+        - "Rajasthan Public Service Commission and state commissions"
+        - "Panchayati Raj in Rajasthan"
+      "Law & Police":
+        - "Bharatiya Nyaya Sanhita 2023 key sections"
+        - "Bharatiya Nagarik Suraksha Sanhita 2023 basics"
+        - "Bharatiya Sakshya Adhiniyam 2023 basics"
+        - "SC/ST (Prevention of Atrocities) Act, POCSO, IT Act highlights"
+      "Hindi":
+        - "Sandhi and Samas"
+        - "Muhavare and Lokoktiyan"
+        - "Paryayvachi, Vilom and shabd-shuddhi"
+      "Reasoning & Mental Ability":
+        - "Coding-decoding, blood relations, direction sense"
+        - "Series, analogy and syllogism"
+      "Current Affairs (Rajasthan & India)":
+        - "Rajasthan government schemes of the current year"
+        - "Recent appointments, awards and events in Rajasthan"
+
+  - id: jee-main
+    name: "JEE Main (NTA)"
+    short_name: "JEE Main"
+    language: en
+    weight: 3
+    audience: "Class 11-12 students preparing for JEE Main"
+    subjects:
+      Physics:
+        - "Rotational motion and moment of inertia"
+        - "Electrostatics: Gauss's law and capacitors"
+        - "Current electricity and Kirchhoff's laws"
+        - "Ray optics and optical instruments"
+        - "Modern physics: photoelectric effect and Bohr model"
+        - "Simple harmonic motion and waves"
+        - "Thermodynamics and kinetic theory"
+      Chemistry:
+        - "Chemical bonding: VSEPR, hybridisation, MOT"
+        - "Coordination compounds: nomenclature, isomerism, CFT"
+        - "Organic reaction mechanisms: SN1, SN2, E1, E2"
+        - "Chemical equilibrium and ionic equilibrium"
+        - "Electrochemistry: Nernst equation and conductance"
+        - "p-block elements: group 15-18 trends"
+      Mathematics:
+        - "Definite integrals and properties"
+        - "Complex numbers and their geometry"
+        - "Conic sections: parabola, ellipse, hyperbola"
+        - "Probability and Bayes' theorem"
+        - "Matrices and determinants"
+        - "Limits, continuity and differentiability"
+        - "Vectors and 3D geometry"
+
+  - id: neet-ug
+    name: "NEET UG (NTA)"
+    short_name: "NEET"
+    language: en
+    weight: 2
+    audience: "Class 11-12 students preparing for NEET UG"
+    subjects:
+      Biology:
+        - "Human physiology: neural control and coordination"
+        - "Genetics: Mendelian inheritance and linkage"
+        - "Molecular basis of inheritance: DNA replication, transcription"
+        - "Plant physiology: photosynthesis C3/C4/CAM"
+        - "Ecology: ecosystems and biodiversity"
+        - "Cell cycle and cell division"
+      Physics:
+        - "Laws of motion and friction"
+        - "Semiconductors and logic gates"
+      Chemistry:
+        - "Biomolecules"
+        - "Periodic classification and periodic trends"
+
+  - id: school-cbse-10
+    name: "CBSE Class 10 Board"
+    short_name: "Class 10"
+    language: hinglish
+    weight: 2
+    audience: "Class 10 CBSE / state board students"
+    subjects:
+      Science:
+        - "Chemical reactions and equations"
+        - "Acids, bases and salts"
+        - "Life processes"
+        - "Light: reflection and refraction"
+        - "Electricity"
+      Mathematics:
+        - "Quadratic equations"
+        - "Arithmetic progressions"
+        - "Trigonometry and its applications"
+        - "Coordinate geometry"
+      "Social Science":
+        - "Nationalism in India"
+        - "Resources and development"
+        - "Power sharing and federalism"
+
+  - id: school-rbse-12
+    name: "RBSE Class 12 Board (Rajasthan)"
+    short_name: "RBSE 12"
+    language: hi
+    weight: 1
+    audience: "Class 12 Rajasthan board students"
+    subjects:
+      "भौतिक विज्ञान (Physics)":
+        - "विद्युत आवेश तथा क्षेत्र"
+        - "किरण प्रकाशिकी"
+      "रसायन विज्ञान (Chemistry)":
+        - "विलयन"
+        - "रासायनिक बलगतिकी"
+      "जीव विज्ञान (Biology)":
+        - "आनुवंशिकता तथा विविधता के सिद्धांत"
+        - "मानव स्वास्थ्य तथा रोग"
+
+  - id: reet
+    name: "REET (Rajasthan Eligibility Exam for Teachers)"
+    short_name: "REET"
+    language: hi
+    weight: 1
+    audience: "Aspiring primary / upper-primary teachers in Rajasthan"
+    subjects:
+      "Child Development & Pedagogy":
+        - "Piaget, Vygotsky and Kohlberg theories"
+        - "Inclusive education and learning disabilities"
+        - "Motivation and learning theories"
+      "Rajasthan GK":
+        - "Rajasthan rivers and lakes"
+        - "Rajasthan folk culture"
+
+  - id: ssc-cgl
+    name: "SSC CGL"
+    short_name: "SSC CGL"
+    language: hinglish
+    weight: 1
+    audience: "Graduates preparing for SSC CGL"
+    subjects:
+      "Quantitative Aptitude":
+        - "Percentage, profit and loss"
+        - "Time, speed and distance"
+        - "Geometry: triangles and circles"
+      "General Awareness":
+        - "Indian national movement"
+        - "Static GK: dances, festivals, important days"
+      English:
+        - "Idioms and phrases"
+        - "One word substitution"

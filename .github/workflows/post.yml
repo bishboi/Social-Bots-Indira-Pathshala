@@ -1,0 +1,86 @@
+# Serverless alternative to the long-running bot: posts on a schedule from GitHub Actions.
+# Add the values from .env.example as repository secrets (Settings -> Secrets and variables -> Actions).
+name: Scheduled post
+
+on:
+  schedule:
+    - cron: "30 2 * * *"    # 08:00 IST
+    - cron: "30 12 * * *"   # 18:00 IST
+  workflow_dispatch:
+    inputs:
+      exam:
+        description: "Exam id (blank = random)"
+        required: false
+      type:
+        description: "Content type (blank = random)"
+        required: false
+      publish:
+        description: "Platforms (all | telegram | telegram,youtube ...; blank = dry run)"
+        default: "all"
+
+concurrency: post
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libpango-1.0-0 libpangoft2-1.0-0
+      - run: pip install -r requirements.txt
+      # Keep the topic history between runs so topics don't repeat.
+      - uses: actions/cache/restore@v4
+        with:
+          path: output/history.sqlite3
+          key: history-${{ github.run_id }}
+          restore-keys: history-
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          BRAND_NAME: ${{ vars.BRAND_NAME || 'Indira Pathshala' }}
+          BRAND_HANDLE: ${{ vars.BRAND_HANDLE || '@indirapathshala' }}
+          IN_EXAM: ${{ inputs.exam }}
+          IN_TYPE: ${{ inputs.type }}
+          IN_PUBLISH: ${{ inputs.publish || 'all' }}
+        run: |
+          ARGS=()
+          [ -n "$IN_EXAM" ] && ARGS+=(--exam "$IN_EXAM")
+          [ -n "$IN_TYPE" ] && ARGS+=(--type "$IN_TYPE")
+          python -m pathshala_bot run --publish "$IN_PUBLISH" "${ARGS[@]}"
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: output/history.sqlite3
+          key: history-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ github.run_id }}
+          path: |
+            output/*/
+            !output/*/segments
+            !output/*/audio
+          retention-days: 14
+
+  # Fast offline checks
+  test:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0
+      - run: pip install -r requirements.txt pytest && pytest -q
