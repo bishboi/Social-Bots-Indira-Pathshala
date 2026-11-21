@@ -143,11 +143,8 @@ class Short(Scene):
         self.add(bg)
         top_band = Rectangle(width=9.2, height=1.9, stroke_width=0).set_fill(BG1, 1).move_to([0, 7.1, 0])
         bot_band = Rectangle(width=9.2, height=1.7, stroke_width=0).set_fill(BG2, 1).move_to([0, -7.2, 0])
-        chip_t = Text(self.spec["exam"], font=self.F(self.spec["exam"]), font_size=28, color=BG1, weight=BOLD)
-        chip = RoundedRectangle(corner_radius=0.27, width=chip_t.width + 0.5, height=0.56, stroke_width=0).set_fill(SAFFRON, 1)
-        chip_t.move_to(chip)
-        chip_g = VGroup(chip, chip_t).to_corner(LEFT + UP, buff=0.45).shift(DOWN * 0.15)
-        brand = Text(self.spec["brand"], font="Poppins", font_size=30, color=WHITE, weight=BOLD).to_corner(RIGHT + UP, buff=0.45).shift(DOWN * 0.22)
+        # Header carries the brand only (no exam name).
+        brand = Text(self.spec["brand"], font="Poppins", font_size=34, color=WHITE, weight=BOLD).move_to([0, 7.15, 0])
         cta_t = Text(f"Join Telegram  {self.spec['handle']}", font="Poppins", font_size=30, color=BG1, weight=BOLD)
         cta = RoundedRectangle(corner_radius=0.3, width=cta_t.width + 0.7, height=0.62, stroke_width=0).set_fill(SAFFRON, 1)
         cta_t.move_to(cta)
@@ -157,9 +154,9 @@ class Short(Scene):
         self.bars = VGroup(*[Line([-4 + i * seg + 0.05, 6.05, 0], [-4 + (i + 1) * seg - 0.05, 6.05, 0], stroke_width=6, color="#50567A") for i in range(n)])
         top_band.set_z_index(9)
         bot_band.set_z_index(9)
-        for m in (chip_g, brand, cta_g, self.bars):
+        for m in (brand, cta_g, self.bars):
             m.set_z_index(11)
-        self.add(top_band, bot_band, chip_g, brand, cta_g, self.bars)
+        self.add(top_band, bot_band, brand, cta_g, self.bars)
 
     # ---------- scene kinds ----------
     def s_title(self, s, dur, accent):

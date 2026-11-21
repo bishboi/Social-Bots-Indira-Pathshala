@@ -9,7 +9,7 @@
   {% endfor %}
   @page {
     size: A4; margin: 22mm 16mm 20mm 16mm;
-    @top-left { content: "{{ brand }} · {{ exam.short_name }}"; font: 600 9pt "PSans", sans-serif; color: #5b5f7a; }
+    @top-left { content: "{{ brand }}"; font: 600 9pt "PSans", sans-serif; color: #5b5f7a; }
     @top-right { content: "{{ handle }}"; font: 9pt "PSans", sans-serif; color: #5b5f7a; }
     @bottom-center { content: counter(page) " / " counter(pages); font: 9pt "PSans", sans-serif; color: #5b5f7a; }
   }
@@ -41,7 +41,7 @@
 </head>
 <body>
   <div class="hero">
-    <div class="chips"><span>{{ exam.short_name }}</span><span class="alt">{{ pkg.subject }}</span></div>
+    <div class="chips"><span class="alt">{{ pkg.subject }}</span></div>
     <h1>{{ pkg.title }}</h1>
     <p class="hook">{{ pkg.hook }}</p>
   </div>

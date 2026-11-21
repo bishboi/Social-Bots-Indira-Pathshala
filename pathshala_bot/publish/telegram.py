@@ -93,12 +93,11 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
         result["messages"].append(tg.send_message(chat, caption[:4096])["message_id"])
 
     for q in pkg.mcqs:
-        prefix = f"[{exam.short_name}] "
-        result["messages"].append(tg.send_quiz(chat, prefix + q.question, q.options, q.correct_index, q.explanation)["message_id"])
+        result["messages"].append(tg.send_quiz(chat, q.question, q.options, q.correct_index, q.explanation)["message_id"])
         time.sleep(1.2)
 
     if "pdf" in assets:
-        cap = f"📄 <b>{safe_html(pkg.title)}</b>\n{safe_html(exam.short_name)} · {safe_html(pkg.subject)}\nFree PDF notes by {safe_html(settings.brand_name)}"
+        cap = f"📄 <b>{safe_html(pkg.title)}</b>\n{safe_html(pkg.subject)}\nFree PDF notes by {safe_html(settings.brand_name)}"
         result["messages"].append(tg.send_document(chat, assets["pdf"], cap)["message_id"])
 
     if "video" in assets and settings.telegram_send_video:

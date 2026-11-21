@@ -128,10 +128,10 @@ def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> P
     accent = ACCENTS.get(slide.kind, SAFFRON)
 
     # header
-    _chip(d, (60, 90), exam.short_name, accent, BG_TOP, lang)
-    brand_font = font_for(settings.brand_name, 36, "bold", "en")
+    # header: brand only (no exam name)
+    brand_font = font_for(settings.brand_name, 40, "bold", "en")
     bw = d.textlength(settings.brand_name, font=brand_font)
-    d.text((W - 60 - bw, 102), settings.brand_name, font=brand_font, fill=WHITE)
+    d.text(((W - bw) / 2, 100), settings.brand_name, font=brand_font, fill=WHITE)
 
     # progress bar
     seg = (W - 120) / total
@@ -199,8 +199,7 @@ def render_card(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
     lang = exam.language
     img = _gradient(cw, ch)
     d = ImageDraw.Draw(img)
-    x = _chip(d, (60, 60), exam.short_name, SAFFRON, BG_TOP, lang)
-    _chip(d, (x + 20, 60), clean(pkg.subject)[:28], (90, 200, 250), BG_TOP, lang)
+    _chip(d, (60, 60), clean(pkg.subject)[:28], (90, 200, 250), BG_TOP, lang)
 
     title = clean(pkg.title)
     tfont, tlines, tlh = fit_text(d, title, cw - 120, 300, "bold", lang, start=84, minimum=48, spacing=1.25)
