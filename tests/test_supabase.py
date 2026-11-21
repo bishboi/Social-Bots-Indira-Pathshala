@@ -11,6 +11,8 @@ import pytest
 from pathshala_bot import supabase_db
 from pathshala_bot.config import settings
 
+_REAL_SUPABASE = supabase_db.Supabase
+
 
 class FakePostgREST:
     """Implements the subset of PostgREST the app uses: eq/neq/gte/not.is.null, order, limit, count, upsert."""
@@ -240,3 +242,24 @@ def test_invalid_key_error_names_the_cause():
     db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_x", transport=httpx.MockTransport(reject))
     with pytest.raises(supabase_db.SupabaseError, match="legacy service_role"):
         db.select("app_config")
+
+
+def test_db_setup_seeds_settings(fake, capsys, monkeypatch):
+    from pathshala_bot.__main__ import db_setup
+
+    object.__setattr__(settings, "supabase_url", "https://abcd1234.supabase.co")
+    object.__setattr__(settings, "supabase_key", "sb_secret_test")
+
+    def gateway(request):  # like Supabase: sb_ keys arrive in `apikey` only; then hand over to the fake DB
+        assert "authorization" not in request.headers and request.headers["apikey"] == "sb_secret_test"
+        request.headers["apikey"] = "service-key"
+        request.headers["authorization"] = "Bearer service-key"
+        return fake(request)
+
+    monkeypatch.setattr(supabase_db, "Supabase", lambda *a, **k: _REAL_SUPABASE(
+        "https://abcd1234.supabase.co", "sb_secret_test", transport=httpx.MockTransport(gateway)))
+    assert db_setup() == 0
+    out = capsys.readouterr().out
+    assert "Secret key" in out and "Created settings from .env" in out and "Supabase is ready" in out
+    assert len(fake.tables["app_config"]) == 1
+    assert db_setup() == 0 and "kept your saved settings" in capsys.readouterr().out

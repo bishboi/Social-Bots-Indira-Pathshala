@@ -61,10 +61,11 @@ On a server, keep the app's data in **Supabase** so nothing is lost on restarts 
    SUPABASE_URL=https://<project>.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=<secret or service_role key>
    ```
-4. Check the connection:
+4. Run the one-step setup. It checks the URL and key (naming the problem if one is wrong), creates the tables when `SUPABASE_DB_URL` is set, verifies them, and seeds the panel settings from `.env`. It's safe to run again at any time.
    ```bash
-   python -m pathshala_bot db-check
+   python -m pathshala_bot db-setup
    ```
+   With Docker: `docker exec pathshala python -m pathshala_bot db-setup`. For a quick status check later, use `db-check`.
 
 | Table | Holds |
 |---|---|

@@ -12,4 +12,4 @@ manim>=0.19
 edge-tts>=7.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
-# optional, only for `python -m pathshala_bot db-init`:  pip install "psycopg[binary]>=3.1"
+psycopg[binary]>=3.1   # db-init / db-setup: creates the Supabase tables over SUPABASE_DB_URL

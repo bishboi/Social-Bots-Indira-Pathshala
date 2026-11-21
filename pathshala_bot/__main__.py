@@ -4,6 +4,7 @@
   python -m pathshala_bot run --from-json output/<run>/content.json --publish telegram   # re-render / re-post
   python -m pathshala_bot serve        # admin UI + scheduler + Telegram bot (set ADMIN_PASSWORD)
   python -m pathshala_bot akhbar --region Rajasthan --language hi [--publish]   # daily current-affairs paper
+  python -m pathshala_bot db-setup     # one-step Supabase setup (check key, create tables, seed settings)
   python -m pathshala_bot db-check     # check the Supabase database (or local SQLite)
   python -m pathshala_bot bot          # bot only, legacy .env schedule
   python -m pathshala_bot exams        # list exams
@@ -54,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("db-check", help="check the database (Supabase or local SQLite)")
     sub.add_parser("db-init", help="create the Supabase tables (needs SUPABASE_DB_URL), same as running supabase/schema.sql")
+    sub.add_parser("db-setup", help="one-step Supabase setup: check key + URL, create tables (if SUPABASE_DB_URL), seed settings from .env")
 
     sub.add_parser("bot", help="Telegram bot only, with the legacy POST_TIMES schedule")
     sub.add_parser("exams", help="list configured exams")
@@ -107,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         res = akhbar.run(ed.desk(), channels=chans, from_json=a.from_json)
         print("\n" + res.summary())
         return 0 if res.ok else 1
+    if a.cmd == "db-setup":
+        return db_setup()
     if a.cmd in ("db-check", "db-init"):
         from . import supabase_db
 
@@ -155,6 +159,74 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("\n" + result.summary())
     return 0 if result.ok else 1
+
+
+def db_setup() -> int:
+    """Guided Supabase setup. Safe to run again at any time."""
+    from . import supabase_db
+    from .config import PROJECT_DIR, settings
+
+    def step(n, text):
+        print(f"\n[{n}/4] {text}")
+
+    if not supabase_db.configured():
+        print("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set in .env.\n"
+              "Add them (Supabase → Project Settings → API Keys: Project URL + a Secret key sb_secret_... or the legacy service_role key),\n"
+              "then recreate the container / restart and run this again.")
+        return 1
+
+    step(1, "Checking SUPABASE_URL and the key")
+    kinds = {"secret": "Secret key (sb_secret_...)", "service_role": "legacy service_role key",
+             "publishable": "Publishable key (wrong key)", "anon": "anon key (wrong key)"}
+    kind = supabase_db.key_kind(settings.supabase_key)
+    print(f"  URL:      {supabase_db.normalize_url(settings.supabase_url)}")
+    print(f"  Key type: {kinds.get(kind, kind)}")
+    problems = supabase_db.diagnose()
+    for p in problems:
+        print(f"  PROBLEM:  {p}")
+    if problems:
+        print("\nFix the key/URL in .env, recreate the container (docker rm -f pathshala + docker run ...) and run db-setup again.")
+        return 1
+
+    step(2, "Creating tables")
+    if settings.supabase_db_url:
+        try:
+            supabase_db.init_schema()
+            print("  Applied supabase/schema.sql")
+        except supabase_db.SupabaseError as e:
+            print(f"  Could not apply the schema automatically: {e}")
+    else:
+        print("  SUPABASE_DB_URL is not set, so tables can't be created from here. Either:\n"
+              "   a) Supabase dashboard → SQL Editor → New query → paste the file below → Run, or\n"
+              "   b) add SUPABASE_DB_URL (Project Settings → Database → Connection string → URI) and run db-setup again.\n"
+              f"  File: {PROJECT_DIR / 'supabase' / 'schema.sql'}  (also in the repo: supabase/schema.sql)")
+
+    step(3, "Checking tables")
+    try:
+        status = supabase_db.Supabase().check()
+    except supabase_db.SupabaseError as e:
+        print(f"  ERROR: {e}")
+        return 1
+    for table, st in status.items():
+        print(f"  {table:11} {'OK' if st == 'ok' else 'ERROR: ' + st}")
+    if not all(v == "ok" for v in status.values()):
+        if any("Invalid API key" in v or "(401)" in v for v in status.values()):
+            print("\n  Supabase rejected the key. Copy it again from THIS project (Project Settings → API Keys).\n"
+                  "  If a Secret key (sb_secret_...) keeps failing, use the legacy service_role key instead.")
+        else:
+            print("\n  Create the tables (step 2), then run db-setup again.")
+        return 1
+
+    step(4, "Seeding admin-panel settings from .env")
+    from . import control
+
+    existed = bool(supabase_db.Supabase().select("app_config", {"select": "id", "id": "eq.1"}))
+    cfg = control.load()  # creates the row from .env (or imports output/control.json) when missing
+    print(f"  {'Already set up - kept your saved settings' if existed else 'Created settings from .env'}:")
+    print(f"    AI provider: {cfg.general.llm_provider} | channels: {len(cfg.channels)} | "
+          f"exams enabled: {sum(e.enabled for e in cfg.exams)} | schedules: {len(cfg.schedules)} | newspaper editions: {len(cfg.editions)}")
+    print("\nSupabase is ready. Open the admin panel (http://localhost:8080) - it should show 'DB: Supabase'.")
+    return 0
 
 
 if __name__ == "__main__":
