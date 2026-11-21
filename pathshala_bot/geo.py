@@ -244,14 +244,19 @@ def render_map_png(spec: MapSpec, out: Path, title: str = "", width: int = 1400,
     from .render import fonts
 
     rm = resolve(spec)
-    height = int(width * 1.0)
+    # Canvas follows the shape of the area shown, so there is no empty margin around it.
+    x0, y0, x1, y1 = rm.view_box
+    aspect = (y1 - y0) / ((x1 - x0) * math.cos(math.radians((y0 + y1) / 2)))
+    top, bottom = (64 if title else 16), 40
+    map_h = int(width * min(1.2, max(0.5, aspect)))
+    height = map_h + top + bottom
     img = Image.new("RGB", (width, height), (247, 248, 252))
     d = ImageDraw.Draw(img)
-    proj = Projection(rm.view_box, width, height - 120, pad=0.06)
+    proj = Projection(rm.view_box, width, map_h, pad=0.03)
 
     def P(lon, lat):
         x, y = proj(lon, lat)
-        return width / 2 + x, (height - 60) / 2 - y + 30
+        return width / 2 + x, top + map_h / 2 - y
 
     hs_names = {s["name"] for s in rm.highlight_states}
     for s in states():
@@ -277,7 +282,7 @@ def render_map_png(spec: MapSpec, out: Path, title: str = "", width: int = 1400,
         f = ImageFont.truetype(str(fonts.pick(pt.label, "bold", language)), 30)
         d.text((x + 16, y - 20), pt.label, font=f, fill=(14, 22, 48), stroke_width=3, stroke_fill="white")
     small = ImageFont.truetype(str(fonts.pick("A", "regular", "en")), 22)
-    d.text((20, height - 36), ATTRIBUTION, font=small, fill=(110, 115, 140))
+    d.text((20, height - 32), ATTRIBUTION, font=small, fill=(110, 115, 140))
     if title:
         tf = ImageFont.truetype(str(fonts.pick(title, "bold", language)), 40)
         d.text((24, 16), title, font=tf, fill=(14, 22, 48))

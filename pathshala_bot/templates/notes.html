@@ -11,21 +11,26 @@
   @font-face { font-family: "{{ f.family }}"; src: url("{{ f.url }}"); font-weight: {{ f.weight }}; }
   {% endfor %}
   @page {
-    size: A4; margin: 22mm 16mm 20mm 16mm;
+    size: A4; margin: 18mm 14mm 16mm 14mm;
     @top-left { content: element(runhead); }
     @top-right { content: "{{ handle }}"; font: 9pt "PSans", sans-serif; color: #5b5f7a; }
     @bottom-left { content: "© {{ year }} {{ owner }}. All rights reserved."; font: 8pt "PSans", sans-serif; color: #5b5f7a; }
     @bottom-right { content: counter(page) " / " counter(pages); font: 9pt "PSans", sans-serif; color: #5b5f7a; }
   }
   :root { --ink: #121630; --muted: #5b5f7a; --accent: #ff9933; --navy: #0e1630; --soft: #f4f5fb; --line: #e3e5f0; }
-  body { font-family: "PSans", "Noto Sans Devanagari", "Noto Sans", "DejaVu Sans", sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.55; }
+  body { font-family: "PSans", "Noto Sans Devanagari", "Noto Sans", "DejaVu Sans", sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.5; orphans: 2; widows: 2; }
+  p { margin: 4px 0 6px; }
   .hero { background: var(--navy); color: #fff; border-radius: 10px; padding: 16px 20px 18px; margin-bottom: 14px; }
   .chips span { display: inline-block; background: var(--accent); color: var(--navy); font-weight: 700; font-size: 8.5pt; border-radius: 20px; padding: 2px 10px; margin-right: 6px; }
   .chips span.alt { background: #5ac8fa; }
   h1 { font-size: 20pt; line-height: 1.25; margin: 10px 0 4px; }
   .hook { color: #cfd3ea; margin: 0; }
-  h2 { font-size: 13pt; margin: 18px 0 6px; padding-bottom: 3px; border-bottom: 2px solid var(--accent); break-after: avoid; }
-  .box { background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; break-inside: avoid; }
+  h2 { font-size: 13pt; margin: 12px 0 5px; padding-bottom: 3px; border-bottom: 2px solid var(--accent); break-after: avoid; }
+  .box { background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; }
+  .mapfig { float: right; width: 42%; margin: 4px 0 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 6px; break-inside: avoid; position: relative; z-index: 1; }
+  .mapfig img { width: 100%; display: block; }
+  .mapfig .cap { font-size: 8pt; color: var(--muted); text-align: center; margin-top: 3px; }
+  .clear { clear: both; }
   ul { margin: 4px 0 4px 0; padding-left: 18px; }
   li { margin: 2px 0; }
   table { width: 100%; border-collapse: collapse; font-size: 9.8pt; }
@@ -34,9 +39,10 @@
   tr:nth-child(even) td { background: var(--soft); }
   td.term { font-weight: 700; width: 34%; }
   .mnemonic { border-left: 5px solid var(--accent); background: #fff6ec; padding: 8px 12px; border-radius: 6px; break-inside: avoid; }
-  .q { break-inside: avoid; margin: 10px 0; }
+  .q { break-inside: avoid; margin: 6px 0 8px; }
   .q .stem { font-weight: 700; }
-  .q ol { list-style: upper-alpha; margin: 4px 0; }
+  .q ol { list-style: upper-alpha; margin: 3px 0; }
+  .q ol.two { columns: 2; column-gap: 18px; }
   .tag { font-size: 8pt; color: var(--muted); }
   .answers td { font-size: 9.5pt; }
   .sources { font-size: 8.5pt; color: var(--muted); word-break: break-all; }
@@ -76,22 +82,22 @@
   <h2>{{ t.key_points }}</h2>
   <div class="box"><ul>{% for p in pkg.key_points %}<li>{{ p }}</li>{% endfor %}</ul></div>
 
+  {% if map_url %}
+  <div class="mapfig"><img src="{{ map_url }}"><div class="cap">{{ t.map }}</div></div>
+  {% endif %}
   {% for s in pkg.notes %}
   <h2>{{ s.heading }}</h2>
   {% for para in s.paragraphs %}<p>{{ para }}</p>{% endfor %}
   {% if s.bullets %}<ul>{% for b in s.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
   {% endfor %}
 
-  {% if map_url %}
-  <h2>{{ t.map }}</h2>
-  <div class="box" style="text-align:center"><img src="{{ map_url }}" style="width:80%"></div>
-  {% endif %}
 
   {% if pkg.mnemonic %}
   <h2>{{ t.mnemonic }}</h2>
   <div class="mnemonic">{{ pkg.mnemonic }}</div>
   {% endif %}
 
+  <div class="clear"></div>
   <h2>{{ t.cheatsheet }}</h2>
   <table>
     <tr><th>{{ t.term }}</th><th>{{ t.detail }}</th></tr>
@@ -102,7 +108,8 @@
   {% for q in pkg.mcqs %}
   <div class="q">
     <div class="stem">Q{{ loop.index }}. {{ q.question }}</div>
-    <ol>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ol>
+    {% set short = (q.options | map('length') | max) <= 38 %}
+    <ol{% if short %} class="two"{% endif %}>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ol>
     <div class="tag">{{ q.difficulty|upper }}{% if q.pyq_reference %} · {{ q.pyq_reference }}{% endif %}</div>
   </div>
   {% endfor %}
