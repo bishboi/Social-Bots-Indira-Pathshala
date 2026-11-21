@@ -316,7 +316,7 @@ Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`. `[space]` is a space's 
 
 ### Hosting options
 
-- **Docker / VPS:** run `docker build -t pathshala .`, then `docker run -d --name pathshala --restart unless-stopped --env-file .env -p 8080:8080 -v "$PWD/data:/data" pathshala`. This runs the admin panel, scheduler and bot, and keeps settings and history in `./data` (or in Supabase). Docker reports the container as *healthy* once the panel is up. This runs the admin panel, scheduler and bot; settings and history persist in `./data`.
+- **Docker / VPS:** run `docker build -t pathshala .`, then `docker run -d --name pathshala --restart unless-stopped --env-file .env -p 8080:8080 -v "$PWD/data:/data" pathshala`. This runs the admin panel, scheduler and bot, and keeps settings and history in `./data` (or in Supabase). Docker reports the container as *healthy* once the panel is up.
 - **GitHub Actions:** `.github/workflows/post.yml` posts at 08:00 and 18:00 IST with no server, and the newspaper at 06:45 IST for the editions in the `AKHBAR_EDITIONS` repository variable (e.g. `Rajasthan:hi,central:hi,central:en`). This option has no admin panel: it uses the `.env` values. Add the `.env` values as repository secrets. You can also run it manually from the Actions tab and pick the exam, format and platforms.
 
 ### Troubleshooting Docker

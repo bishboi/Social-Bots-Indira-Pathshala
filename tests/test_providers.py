@@ -157,3 +157,21 @@ def test_output_models_are_openai_strict_compatible():
         assert '"default"' not in json.dumps(schema), model.__name__
         for obj in objects(schema):
             assert set(obj["required"]) == set(obj["properties"]) and obj["additionalProperties"] is False
+
+
+def test_friendly_error_for_missing_ai_key():
+    from pathshala_bot.config import settings
+    from pathshala_bot.providers import friendly_error
+
+    saved = settings.llm_provider
+    try:
+        object.__setattr__(settings, "llm_provider", "anthropic")
+        msg = friendly_error('TypeError: "Could not resolve authentication method. Expected one of api_key, auth_token, or credentials"')
+        assert "Anthropic" in msg and "Settings" in msg
+        object.__setattr__(settings, "llm_provider", "openai")
+        assert "OPENAI_API_KEY" in friendly_error("Error code: 401 - Incorrect API key provided: sk-...")
+        # other services' errors are left alone
+        assert friendly_error("Supabase GET failed (401): Invalid API key") == "Supabase GET failed (401): Invalid API key"
+        assert friendly_error("Telegram sendMessage failed: 401 Unauthorized") == "Telegram sendMessage failed: 401 Unauthorized"
+    finally:
+        object.__setattr__(settings, "llm_provider", saved)

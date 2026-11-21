@@ -197,3 +197,21 @@ def reset() -> None:
 def describe() -> str:
     p = (settings.llm_provider or "anthropic").lower()
     return f"{p}:{settings.openai_model if p == 'openai' else settings.claude_model}"
+
+
+# exact messages of the Anthropic / OpenAI SDKs for a missing or rejected key (not other services' 401s)
+_KEY_HINTS = ("could not resolve authentication method", "invalid x-api-key", "incorrect api key provided",
+              "authentication_error", "the api_key client option must be set")
+
+
+def friendly_error(message: str) -> str:
+    """Plain-language version of the provider errors people hit most (a missing or wrong API key)."""
+    from .config import settings
+
+    low = (message or "").lower()
+    if any(h in low for h in _KEY_HINTS):
+        name = "OpenAI" if settings.llm_provider == "openai" else "Anthropic"
+        env = "OPENAI_API_KEY" if settings.llm_provider == "openai" else "ANTHROPIC_API_KEY"
+        return (f"The AI provider ({name}) has no valid API key. Add it in the panel under Settings -> Keys "
+                f"(or {env} in .env, then recreate the container).")
+    return message

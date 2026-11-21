@@ -192,10 +192,9 @@ def create_app(with_bot: bool = True) -> FastAPI:
             raise HTTPException(400, str(e)) from e
         except Exception as e:  # no API key, provider error...
             log.exception("exam lookup failed")
-            msg = str(e)
-            if any(w in msg.lower() for w in ("api_key", "authentication", "auth_token", "401", "invalid x-api-key", "incorrect api key")):
-                msg = f"the AI provider ({settings.llm_provider}) has no valid API key - add it in Settings → Keys"
-            raise HTTPException(502, f"Could not research the exam: {msg[:300]}") from e
+            from ..providers import friendly_error
+
+            raise HTTPException(502, f"Could not research the exam: {friendly_error(str(e))[:300]}") from e
 
     @app.post("/api/spaces/{sid}/run", dependencies=guard)
     async def run_space_now(sid: str, dry: bool = False):

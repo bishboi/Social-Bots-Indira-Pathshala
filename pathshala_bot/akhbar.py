@@ -35,8 +35,10 @@ log = logging.getLogger(__name__)
 
 def _last_line(text: str) -> str:
     """The informative line of a traceback (the exception message), not 'Traceback ...'."""
+    from .providers import friendly_error
+
     lines = [l for l in text.strip().splitlines() if l.strip()]
-    return (lines[-1] if lines else text)[:300]
+    return friendly_error((lines[-1] if lines else text))[:300]
 
 MAX_AGE_DAYS = 3
 
