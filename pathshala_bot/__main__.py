@@ -3,7 +3,7 @@
   python -m pathshala_bot run [--exam rajasthan-si] [--type pyq_quiz] [--publish telegram,youtube,instagram]
   python -m pathshala_bot run --from-json output/<run>/content.json --publish telegram   # re-render / re-post
   python -m pathshala_bot serve        # admin UI + scheduler + Telegram bot (set ADMIN_PASSWORD)
-  python -m pathshala_bot akhbar --exam rajasthan-si [--publish]   # daily current-affairs paper
+  python -m pathshala_bot akhbar --region Rajasthan --language hi [--publish]   # daily current-affairs paper
   python -m pathshala_bot bot          # bot only, legacy .env schedule
   python -m pathshala_bot exams        # list exams
 """
@@ -43,9 +43,11 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=8080)
     sv.add_argument("--no-bot", action="store_true", help="don't start Telegram bot polling")
 
-    ak = sub.add_parser("akhbar", help="build today's current-affairs newspaper for an exam")
-    ak.add_argument("--exam", required=True)
-    ak.add_argument("--publish", action="store_true", help="post to the exam's Telegram channels from the admin config")
+    ak = sub.add_parser("akhbar", help="build today's current-affairs newspaper (one edition = a state or central + a language)")
+    ak.add_argument("--edition", help="edition id from the admin panel, e.g. rajasthan-hi, central-en")
+    ak.add_argument("--region", help="'central' or a state/UT name, e.g. Rajasthan, 'Uttar Pradesh'")
+    ak.add_argument("--language", choices=["hi", "en", "hinglish"], default="hi")
+    ak.add_argument("--publish", action="store_true", help="post to the edition's Telegram channels from the admin config")
     ak.add_argument("--chat", help="post to this Telegram chat instead")
     ak.add_argument("--from-json", type=Path, help="render an existing akhbar.json (no AI calls)")
 
@@ -76,16 +78,23 @@ def main(argv: list[str] | None = None) -> int:
 
         cfg = control.load()
         control.apply(cfg)
-        exams = control.all_exam_defs(cfg)
-        if a.exam not in exams:
-            ap.error(f"unknown exam {a.exam}")
-        exam = control.effective_exams(cfg).get(a.exam) or exams[a.exam]
+        if a.edition:
+            ed = cfg.edition(a.edition)
+            if ed is None:
+                ap.error(f"unknown edition {a.edition}; known: {', '.join(e.id for e in cfg.editions)}")
+        elif a.region:
+            region = next((r for r in akhbar.regions() if r.lower() == a.region.lower()), None)
+            if region is None:
+                ap.error(f"unknown region {a.region}; use 'central' or one of: {', '.join(akhbar.regions()[1:])}")
+            ed = next((e for e in cfg.editions if e.region == region and e.language == a.language), None) or control.NewsEdition(region=region, language=a.language)
+        else:
+            ap.error("give --edition or --region")
         chans = []
         if a.chat:
             chans = [control.Channel(name="cli", platform="telegram", chat_id=a.chat)]
         elif a.publish:
-            chans = [c for c in control.channels_for(cfg, a.exam) if c.platform == "telegram"]
-        res = akhbar.run(exam, channels=chans, from_json=a.from_json)
+            chans = control.channels_for_edition(cfg, ed)
+        res = akhbar.run(ed.desk(), channels=chans, from_json=a.from_json)
         print("\n" + res.summary())
         return 0 if res.ok else 1
     if a.cmd == "bot":

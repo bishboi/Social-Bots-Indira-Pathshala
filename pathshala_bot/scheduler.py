@@ -60,15 +60,14 @@ def _execute(cfg: control.ControlConfig, sched: control.Schedule, dry_run: bool)
     if sched.kind == "akhbar":
         from . import akhbar
 
-        pool = control.effective_exams(cfg, sched.language)
-        targets = [pool[i] for i in (sched.exam_ids or list(pool)) if i in pool]
-        if not targets:
-            raise RuntimeError("no enabled exam for this newspaper schedule")
+        editions = control.editions_for(cfg, sched)
+        if not editions:
+            raise RuntimeError("no enabled newspaper edition for this schedule")
         out = []
-        for exam in targets:
-            chans = [] if dry_run else [c for c in control.channels_for(cfg, exam.id, sched) if c.platform == "telegram"]
-            res = akhbar.run(exam, channels=chans, questions=sched.outputs.questions)
-            out.append(res.summary())
+        for ed in editions:
+            desk = akhbar.Desk(region=ed.region, language=sched.language or ed.language)
+            chans = [] if dry_run else control.channels_for_edition(cfg, ed, sched)
+            out.append(akhbar.run(desk, channels=chans, questions=sched.outputs.questions).summary())
         return "\n\n".join(out)
 
     from . import pipeline

@@ -1,8 +1,11 @@
-"""Daily current-affairs newspaper ("Akhbar") for an exam.
+"""Daily current-affairs newspaper ("Akhbar"), one edition per region + language.
+
+An edition is either a state/UT ("Rajasthan" -> same paper for every Rajasthan exam:
+RPSC, police, RSSB, REET...) or "central" (national paper for UPSC, SSC, banking,
+railways, defence...), in Hindi, English or Hinglish.
 
 1. Research: Claude searches the web for the last ~24-48h of news and decides what
-   matters for this exam (state news for state PSC exams, science/NTA notices for
-   JEE/NEET, etc.).
+   matters for that region's competitive exams.
 2. Edition: structured articles (headline, body, key facts, exam angle, sources),
    one-liners, "did you know" static links and a quiz.
 3. Checks: stale or undated stories and stories without sources are dropped.
@@ -23,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
-from .config import Exam, settings
+from .config import settings
 from .models import MCQ, Source
 from .store import History
 
@@ -55,6 +58,67 @@ CATEGORY_LABELS = {
 Category = Literal[tuple(CATEGORY_LABELS)]  # type: ignore[valid-type]
 
 
+CENTRAL = "central"
+
+# Hindi names for state editions (keys match the official boundary data in geo.py)
+STATE_HI = {
+    "Andaman & Nicobar": "अंडमान और निकोबार", "Andhra Pradesh": "आंध्र प्रदेश", "Arunachal Pradesh": "अरुणाचल प्रदेश",
+    "Assam": "असम", "Bihar": "बिहार", "Chandigarh": "चंडीगढ़", "Chhattisgarh": "छत्तीसगढ़",
+    "Dadra and Nagar Haveli and Daman and Diu": "दादरा और नगर हवेली और दमन और दीव", "Delhi": "दिल्ली", "Goa": "गोवा",
+    "Gujarat": "गुजरात", "Haryana": "हरियाणा", "Himachal Pradesh": "हिमाचल प्रदेश", "Jammu & Kashmir": "जम्मू और कश्मीर",
+    "Jharkhand": "झारखंड", "Karnataka": "कर्नाटक", "Kerala": "केरल", "Ladakh": "लद्दाख", "Lakshadweep": "लक्षद्वीप",
+    "Madhya Pradesh": "मध्य प्रदेश", "Maharashtra": "महाराष्ट्र", "Manipur": "मणिपुर", "Meghalaya": "मेघालय",
+    "Mizoram": "मिज़ोरम", "Nagaland": "नागालैंड", "Odisha": "ओडिशा", "Puducherry": "पुडुचेरी", "Punjab": "पंजाब",
+    "Rajasthan": "राजस्थान", "Sikkim": "सिक्किम", "Tamil Nadu": "तमिलनाडु", "Telangana": "तेलंगाना", "Tripura": "त्रिपुरा",
+    "Uttar Pradesh": "उत्तर प्रदेश", "Uttarakhand": "उत्तराखंड", "West Bengal": "पश्चिम बंगाल",
+}
+
+
+def regions() -> list[str]:
+    """'central' plus every state/UT, in the spelling used by the boundary data."""
+    return [CENTRAL] + sorted(STATE_HI)
+
+
+@dataclass(frozen=True)
+class Desk:
+    """One newspaper edition: a region (state or central) in one language."""
+
+    region: str
+    language: str = "hi"
+    id: str = ""
+
+    @property
+    def key(self) -> str:
+        """Stable id used for history / dedup, e.g. 'rajasthan-hi', 'central-en'."""
+        return self.id or f"{re.sub(r'[^a-z0-9]+', '-', self.region.lower()).strip('-')}-{self.language}"
+
+    @property
+    def central(self) -> bool:
+        return self.region == CENTRAL
+
+    def label(self) -> str:
+        if self.language == "hi":
+            return "राष्ट्रीय संस्करण" if self.central else f"{STATE_HI.get(self.region, self.region)} संस्करण"
+        return "National edition" if self.central else f"{self.region} edition"
+
+
+def desk_brief(desk: Desk) -> str:
+    """What this edition covers and for whom - shared by research and writing."""
+    if desk.central:
+        return """NATIONAL (CENTRAL) EDITION - for aspirants of central government exams: UPSC (civil services, CDS, NDA),
+SSC (CGL, CHSL, GD), banking and insurance (IBPS, SBI, RBI, LIC), railways (RRB), defence, CTET and NTA exams.
+Mix: ~65% national (Union government decisions, schemes, economy and RBI, polity and governance, science and technology,
+ISRO/DRDO, environment, defence, reports and indices, awards, appointments, sports, important days) and ~35% international
+(India's bilateral relations, summits, organisations). Prefer PIB, ministry websites, RBI, ISRO and major national papers."""
+    return f"""{desk.region.upper()} STATE EDITION - one paper for aspirants of ALL {desk.region} government exams: the state public
+service commission (state civil services), police (SI, constable), staff/subordinate selection board exams (patwari, clerk,
+gram sevak...), teacher recruitment and the state board. It is the same paper whichever of these exams the reader takes.
+Mix: ~55% {desk.region} news (state government decisions, cabinet, schemes, budget, appointments, state awards, culture
+and heritage, festivals, geography and environment, economy, infrastructure, sports, district-level firsts, recruitment
+notices), ~30% national and ~15% international. Prefer the official {desk.region} government and public-relations
+(DIPR / jansampark) portals, the state PSC/board websites and the leading newspapers of {desk.region}, plus PIB for national news."""
+
+
 class NewsArticle(BaseModel):
     headline: str = Field(description="Newspaper headline, max 12 words, factual.")
     category: Category
@@ -63,9 +127,9 @@ class NewsArticle(BaseModel):
     summary: str = Field(description="1-2 sentence standfirst summarising the story.")
     body: list[str] = Field(description="2-4 short paragraphs (total 120-200 words): what happened, background, significance.")
     key_facts: list[str] = Field(description="3-5 exam-ready facts (names, numbers, places, dates) from this story.")
-    exam_angle: str = Field(description="Why this matters for the exam: which paper/topic it connects to and how it may be asked.")
+    exam_angle: str = Field(description="Why aspirants should care: which exams/papers and syllabus topic it connects to, and how it may be asked.")
     static_link: str | None = Field(default=None, description="Related static GK fact worth revising, or null.")
-    importance: int = Field(description="1-5 relevance for this exam (5 = very likely to be asked).")
+    importance: int = Field(description="1-5 relevance for this edition's exams (5 = very likely to be asked).")
     sources: list[Source] = Field(description="Sources used for this story (from the research notes). Never empty.")
 
 
@@ -80,7 +144,7 @@ class AkhbarEdition(BaseModel):
 @dataclass
 class AkhbarResult:
     run_dir: Path
-    exam: Exam
+    desk: Desk
     edition: AkhbarEdition | None = None
     pdf: Path | None = None
     published: dict = field(default_factory=dict)
@@ -91,7 +155,7 @@ class AkhbarResult:
         return self.pdf is not None
 
     def summary(self) -> str:
-        lines = [f"Akhbar: {self.run_dir}", f"Exam: {self.exam.name}"]
+        lines = [f"Akhbar: {self.run_dir}", f"Edition: {self.desk.label()} ({self.desk.key})"]
         if self.edition:
             lines.append(f"Articles: {len(self.edition.articles)}, quiz: {len(self.edition.quiz)}")
         if self.pdf:
@@ -105,50 +169,47 @@ def today() -> date:
     return datetime.now(ZoneInfo(settings.post_timezone)).date()
 
 
-def research_news(exam: Exam, day: date, avoid: list[str]):
+def research_news(desk: Desk, day: date, avoid: list[str]):
     from . import llm
 
     avoid_txt = "\n".join(f"- {h}" for h in avoid[:60]) or "- (none)"
     prompt = f"""You are the news desk of "{settings.brand_name}", which publishes a daily current-affairs paper for exam aspirants.
 Today is {day.isoformat()} ({day.strftime('%A')}).
 
-Exam: {exam.name}
-Audience: {exam.audience}
+{desk_brief(desk)}
 
-Use web search to find the news from the last 24-48 hours (at most {MAX_AGE_DAYS} days old) that matters most for THIS exam.
-You decide what is important, the way a top coaching institute would: e.g. for a state PSC / police exam put state news
-(government schemes, appointments, budgets, culture, geography, state-level awards) first, then national and international;
-for JEE/NEET focus on science and technology, health, environment and official exam notices (NTA, dates, syllabus); for
-school boards, education-policy and general-awareness items. Skip pure politics, crime and celebrity news unless clearly exam-relevant.
+Use web search to find the news from the last 24-48 hours (at most {MAX_AGE_DAYS} days old) that matters most for these readers.
+You decide what is important, the way a top coaching institute would. Skip party politics, crime and celebrity news unless
+clearly exam-relevant. Verify names, numbers and dates against at least one reliable source.
 
-Prefer official and reputable sources (PIB, government portals, The Hindu, Indian Express, state DIPR, Dainik Bhaskar, Rajasthan Patrika,
-NTA, ISRO, RBI). Verify names, numbers and dates against at least one reliable source.
-
-Already published in recent editions (do not repeat unless there is a genuinely new development):
+Already published in recent editions of this paper (do not repeat unless there is a genuinely new development):
 {avoid_txt}
 
 Reply with research notes in English: 12-16 candidate stories, each as
 STORY: <headline>
+SCOPE: <state | national | international>
 DATE: <YYYY-MM-DD of the event/report>
 PLACE: <dateline>
 FACTS: <bullet facts with names, numbers, dates>
-WHY IT MATTERS FOR THE EXAM: <1-2 lines>
+WHY IT MATTERS FOR THE EXAMS: <1-2 lines>
 SOURCES: <title - url> (one or more)
 Then 15 extra one-line facts (with dates) and their sources."""
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max(settings.max_web_searches, 12)}]
     return llm.web_research(prompt, tools)
 
 
-def write_edition(exam: Exam, day: date, research) -> AkhbarEdition:
+def write_edition(desk: Desk, day: date, research) -> AkhbarEdition:
     from . import llm
 
     src_list = "\n".join(f"- {s['title']} - {s['url']}" for s in research.sources[:60])
-    system = f"""You are the editor of a daily current-affairs newspaper for {exam.name} aspirants, published by "{settings.brand_name}".
-- {llm.LANG_RULES.get(exam.language, llm.LANG_RULES['en'])}
+    system = f"""You are the editor of a daily current-affairs newspaper published by "{settings.brand_name}".
+{desk_brief(desk)}
+- {llm.LANG_RULES.get(desk.language, llm.LANG_RULES['en'])}
 - Use only facts from the research notes. Never invent numbers, names, quotes or dates. If a detail is unclear, leave it out.
 - Write like a quality newspaper: neutral, clear, short sentences, no opinions.
 - Every article must have a 'date' from the notes and at least one source URL from the notes.
-- Order articles by importance for this exam. Quiz questions must be answerable from today's articles, with exactly 4 options."""
+- Use category 'state' for {desk.region} news{' (there is none in the national edition)' if desk.central else ''}.
+- Order articles by importance for these readers. Quiz questions must be answerable from today's articles, with exactly 4 options."""
     user = f"""Edition date: {day.isoformat()}
 
 RESEARCH NOTES
@@ -191,7 +252,7 @@ def check_edition(ed: AkhbarEdition, day: date) -> list[str]:
     return notes
 
 
-def render(ed: AkhbarEdition, exam: Exam, day: date, issue_no: int, out: Path, title: str) -> Path:
+def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, title: str) -> Path:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from weasyprint import HTML
 
@@ -199,7 +260,7 @@ def render(ed: AkhbarEdition, exam: Exam, day: date, issue_no: int, out: Path, t
     from .render import fonts
 
     env = Environment(loader=FileSystemLoader(PACKAGE_DIR / "templates"), autoescape=select_autoescape(["html"]))
-    hi = exam.language == "hi"
+    hi = desk.language == "hi"
     idx = fonts._index()
 
     def face(name, fallback):
@@ -210,7 +271,7 @@ def render(ed: AkhbarEdition, exam: Exam, day: date, issue_no: int, out: Path, t
     days_hi = ["सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार", "रविवार"]
     date_str = f"{days_hi[day.weekday()]}, {day.day} {months_hi[day.month - 1]} {day.year}" if hi else day.strftime("%A, %d %B %Y")
     html = env.get_template("akhbar.html").render(
-        ed=ed, exam=exam, title=title, date_str=date_str, issue_no=issue_no, hi=hi,
+        ed=ed, desk=desk, edition_label=desk.label(), title=title, date_str=date_str, issue_no=issue_no, hi=hi,
         cat=lambda c: CATEGORY_LABELS.get(c, CATEGORY_LABELS["other"])[0 if hi else 1],
         serif_regular=face("NotoSerifDevanagari-Regular.ttf", ("deva", "regular")),
         serif_bold=face("NotoSerifDevanagari-Bold.ttf", ("deva", "bold")),
@@ -226,15 +287,15 @@ def render(ed: AkhbarEdition, exam: Exam, day: date, issue_no: int, out: Path, t
     return out
 
 
-def publish_telegram(ed: AkhbarEdition, exam: Exam, pdf: Path, title: str, date_str: str, chat_id: str, questions: bool = True) -> dict:
+def publish_telegram(ed: AkhbarEdition, desk: Desk, pdf: Path, title: str, date_str: str, chat_id: str, questions: bool = True) -> dict:
     import time
 
     from .publish.telegram import Telegram, safe_html
 
     tg = Telegram()
     heads = "\n".join(f"▪️ {safe_html(a.headline)}" for a in ed.articles[:6])
-    label = "आज के मुख्य समाचार" if exam.language == "hi" else "Today's top stories"
-    cap = f"🗞 <b>{safe_html(title)}</b>\n{safe_html(date_str)}\n\n<b>{label}</b>\n{heads}\n\n📥 PDF ⬆️ | {safe_html(settings.brand_handle)}"
+    label = "आज के मुख्य समाचार" if desk.language == "hi" else "Today's top stories"
+    cap = f"🗞 <b>{safe_html(title)}</b> · {safe_html(desk.label())}\n{safe_html(date_str)}\n\n<b>{label}</b>\n{heads}\n\n📥 PDF ⬆️ | {safe_html(settings.brand_handle)}"
     res = {"chat_id": chat_id, "messages": [tg.send_document(chat_id, pdf, cap[:1024])["message_id"]]}
     if questions:
         for q in ed.quiz[:10]:
@@ -243,27 +304,27 @@ def publish_telegram(ed: AkhbarEdition, exam: Exam, pdf: Path, title: str, date_
     return res
 
 
-def run(exam: Exam, channels: list | None = None, questions: bool = True, day: date | None = None, from_json: Path | None = None,
+def run(desk: Desk, channels: list | None = None, questions: bool = True, day: date | None = None, from_json: Path | None = None,
         title: str | None = None) -> AkhbarResult:
-    """Build (and, if channels are given, publish) one edition for one exam."""
-    from . import llm
+    """Build (and, if channels are given, publish) one edition."""
+    from . import llm  # noqa: F401  (imported for side effects in tests)
 
     day = day or today()
     history = History(settings.db_path)
-    run_dir = settings.output_dir / f"{day.strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}_{exam.id}_akhbar"
+    run_dir = settings.output_dir / f"{day.strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}_akhbar_{desk.key}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    result = AkhbarResult(run_dir, exam)
-    hi = exam.language == "hi"
-    title = title or (settings.akhbar_title_hi if hi else settings.akhbar_title_en) or (
-        "पाठशाला समाचार" if hi else "Pathshala Times")
+    result = AkhbarResult(run_dir, desk)
+    hi = desk.language == "hi"
+    title = title or (settings.akhbar_title_hi if hi else settings.akhbar_title_en) or ("पाठशाला समाचार" if hi else "Pathshala Times")
+    hkey = f"akhbar:{desk.key}"
 
     try:
         if from_json:
             ed = AkhbarEdition.model_validate_json(Path(from_json).read_text(encoding="utf-8"))
         else:
-            research = research_news(exam, day, history.recent_headlines(exam.id))
+            research = research_news(desk, day, history.recent_headlines(hkey))
             (run_dir / "research.md").write_text(research.notes + "\n\nSOURCES\n" + "\n".join(f"- {s['title']}: {s['url']}" for s in research.sources), encoding="utf-8")
-            ed = write_edition(exam, day, research)
+            ed = write_edition(desk, day, research)
         dropped = check_edition(ed, day) if not from_json else []
         if dropped:
             log.info("akhbar checks: %s", dropped)
@@ -271,8 +332,8 @@ def run(exam: Exam, channels: list | None = None, questions: bool = True, day: d
             raise RuntimeError("no usable articles after checks: " + "; ".join(dropped))
         result.edition = ed
         (run_dir / "akhbar.json").write_text(ed.model_dump_json(indent=2), encoding="utf-8")
-        issue_no = history.akhbar_count(exam.id) + 1
-        result.pdf = render(ed, exam, day, issue_no, run_dir / f"akhbar_{exam.id}_{day.isoformat()}.pdf", title)
+        issue_no = history.akhbar_count(hkey) + 1
+        result.pdf = render(ed, desk, day, issue_no, run_dir / f"akhbar_{desk.key}_{day.isoformat()}.pdf", title)
     except Exception:
         log.exception("akhbar build failed")
         result.errors["build"] = traceback.format_exc()
@@ -284,19 +345,19 @@ def run(exam: Exam, channels: list | None = None, questions: bool = True, day: d
                 continue
             key = f"telegram:{ch.name}"
             try:
-                result.published[key] = publish_telegram(result.edition, exam, result.pdf, title, date_str, ch.chat_id, questions)
+                result.published[key] = publish_telegram(result.edition, desk, result.pdf, title, date_str, ch.chat_id, questions)
             except Exception:
                 log.exception("akhbar publish failed")
                 result.errors[key] = traceback.format_exc()
 
     (run_dir / "manifest.json").write_text(json.dumps({
-        "kind": "akhbar", "exam": exam.id, "date": day.isoformat(), "pdf": str(result.pdf) if result.pdf else None,
+        "kind": "akhbar", "edition": desk.key, "region": desk.region, "language": desk.language, "date": day.isoformat(), "pdf": str(result.pdf) if result.pdf else None,
         "articles": [a.headline for a in result.edition.articles] if result.edition else [],
         "published": result.published, "errors": result.errors,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     status = "ok" if result.ok and not result.errors else ("partial" if result.ok else "failed")
     lead = result.edition.articles[0].headline if result.edition and result.edition.articles else ""
-    history.record(exam.id, "Current Affairs", lead, "akhbar", str(run_dir), status, result.published)
+    history.record(hkey, desk.label(), lead, "akhbar", str(run_dir), status, result.published)
     if result.edition:
-        history.add_headlines(exam.id, day.isoformat(), [a.headline for a in result.edition.articles])
+        history.add_headlines(hkey, day.isoformat(), [a.headline for a in result.edition.articles])
     return result

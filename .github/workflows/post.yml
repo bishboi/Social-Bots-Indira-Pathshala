@@ -51,9 +51,14 @@ jobs:
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           BRAND_NAME: ${{ vars.BRAND_NAME || 'Indira Pathshala' }}
           BRAND_HANDLE: ${{ vars.BRAND_HANDLE || '@indirapathshala' }}
-          AKHBAR_EXAMS: ${{ vars.AKHBAR_EXAMS || 'rajasthan-si' }}
+          # Editions as region:language, comma separated, e.g. "Rajasthan:hi,central:hi,central:en"
+          AKHBAR_EDITIONS: ${{ vars.AKHBAR_EDITIONS || 'Rajasthan:hi,central:hi' }}
         run: |
-          for e in ${AKHBAR_EXAMS//,/ }; do python -m pathshala_bot akhbar --exam "$e" --publish || true; done
+          IFS=',' read -ra EDS <<< "$AKHBAR_EDITIONS"
+          for item in "${EDS[@]}"; do
+            region="$(echo "${item%%:*}" | xargs)"; lang="$(echo "${item##*:}" | xargs)"
+            python -m pathshala_bot akhbar --region "$region" --language "$lang" --publish || true
+          done
       - name: Run pipeline
         if: github.event.schedule != '15 1 * * *'
         env:

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>{{ title }} · {{ date_str }}</title>
 <meta name="author" content="{{ owner }}">
-<meta name="description" content="{{ title }} · {{ exam.name }} · {{ date_str }}">
+<meta name="description" content="{{ title }} · {{ edition_label }} · {{ date_str }}">
 <style>
   @font-face { font-family: "Serif"; src: url("{{ serif_regular }}"); font-weight: 400; }
   @font-face { font-family: "Serif"; src: url("{{ serif_bold }}"); font-weight: 700; }
@@ -13,7 +13,7 @@
   @page {
     size: A4; margin: 12mm 11mm 14mm 11mm;
     @bottom-left { content: "© {{ year }} {{ owner }}. All rights reserved."; font: 7.5pt "Sans"; color: #666; }
-    @bottom-center { content: "{{ title }} · {{ date_str }}"; font: 7.5pt "Sans"; color: #666; }
+    @bottom-center { content: "{{ title }} · {{ edition_label }} · {{ date_str }}"; font: 7.5pt "Sans"; color: #666; }
     @bottom-right { content: counter(page) " / " counter(pages); font: 7.5pt "Sans"; color: #666; }
   }
   @page :first { margin-top: 10mm; }
@@ -27,6 +27,7 @@
   .mast .name { flex: 1; text-align: center; }
   .mast h1 { font: 700 34pt/1.05 "Serif"; margin: 0; letter-spacing: 0.5pt; }
   .mast .tag { font: 9pt "Sans"; color: var(--muted); margin-top: 2px; }
+  .mast .edition { display: inline-block; font: 700 9pt "Sans"; color: #fff; background: var(--accent); padding: 1px 10px; border-radius: 3px; margin-top: 3px; }
   .mast .right { width: 34mm; text-align: right; font: 8pt/1.4 "Sans"; color: var(--muted); }
   .mast .right b { color: var(--ink); }
   .strip { display: flex; justify-content: space-between; font: 8pt "Sans"; border-bottom: 1px solid var(--rule); padding: 3px 0; margin-bottom: 8px; }
@@ -77,13 +78,14 @@
   {% if logo_url %}<img src="{{ logo_url }}">{% else %}<div style="width:22mm"></div>{% endif %}
   <div class="name">
     <h1>{{ title }}</h1>
+    <div class="edition">{{ edition_label }}</div>
     <div class="tag">{{ ed.tagline }}</div>
   </div>
   <div class="right"><b>{{ date_str }}</b><br>{{ 'अंक' if hi else 'Issue' }} {{ issue_no }}<br>{{ handle }}</div>
 </div>
 <div class="strip">
-  <span class="ex">{{ exam.name }}</span>
-  <span>{{ 'परीक्षा-उपयोगी दैनिक करंट अफेयर्स' if hi else 'Exam-focused daily current affairs' }}</span>
+  <span class="ex">{{ edition_label }}</span>
+  <span>{% if desk.central %}{{ 'केंद्रीय प्रतियोगी परीक्षाओं हेतु दैनिक करंट अफेयर्स' if hi else 'Daily current affairs for central government exams' }}{% else %}{{ ('राज्य की सभी प्रतियोगी परीक्षाओं हेतु दैनिक करंट अफेयर्स') if hi else ('Daily current affairs for all ' ~ desk.region ~ ' government exams') }}{% endif %}</span>
   <span>{{ brand }}</span>
 </div>
 

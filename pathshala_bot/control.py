@@ -72,6 +72,29 @@ class CustomExam(BaseModel):
     subjects: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class NewsEdition(BaseModel):
+    """A daily newspaper edition: one region (a state/UT or 'central') in one language."""
+
+    id: str = Field(default_factory=_id)
+    region: str = "central"  # 'central' or a state/UT name as in akhbar.STATE_HI
+    language: Language = "hi"
+    enabled: bool = True
+    channel_ids: list[str] = Field(default_factory=list)  # empty = all enabled Telegram channels
+
+    def desk(self):
+        from .akhbar import Desk
+
+        return Desk(region=self.region, language=self.language)
+
+
+def default_editions() -> list[NewsEdition]:
+    return [
+        NewsEdition(id="rajasthan-hi", region="Rajasthan", language="hi"),
+        NewsEdition(id="central-hi", region="central", language="hi"),
+        NewsEdition(id="central-en", region="central", language="en", enabled=False),
+    ]
+
+
 class Outputs(BaseModel):
     card: bool = True
     questions: bool = True
@@ -92,7 +115,8 @@ class Schedule(BaseModel):
     start_at: str = "07:00"  # anchor for interval schedules
     times: list[str] = Field(default_factory=lambda: ["08:00"])  # daily schedules
     days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
-    exam_ids: list[str] = Field(default_factory=list)  # empty = all enabled exams
+    exam_ids: list[str] = Field(default_factory=list)  # content schedules; empty = all enabled exams
+    edition_ids: list[str] = Field(default_factory=list)  # newspaper schedules; empty = all enabled editions
     content_types: list[str] = Field(default_factory=list)  # empty = auto
     video_styles: list[str] = Field(default_factory=list)  # empty = auto
     outputs: Outputs = Field(default_factory=Outputs)
@@ -128,6 +152,10 @@ class ControlConfig(BaseModel):
     exams: list[ExamSetting] = Field(default_factory=list)
     custom_exams: list[CustomExam] = Field(default_factory=list)
     schedules: list[Schedule] = Field(default_factory=list)
+    editions: list[NewsEdition] = Field(default_factory=default_editions)
+
+    def edition(self, eid: str) -> NewsEdition | None:
+        return next((e for e in self.editions if e.id == eid), None)
 
     def channel(self, cid: str) -> Channel | None:
         return next((c for c in self.channels if c.id == cid), None)
@@ -168,8 +196,7 @@ def _seed_from_env() -> ControlConfig:
     cfg.exams = [ExamSetting(exam_id=e.id, weight=e.weight) for e in load_catalogue().values()]
     cfg.schedules = [
         Schedule(name="Daily posts", mode="daily", times=list(settings.post_times)),
-        Schedule(name="Daily current affairs (Akhbar)", kind="akhbar", mode="daily", times=["07:00"],
-                 exam_ids=["rajasthan-si"], enabled=False),
+        Schedule(name="Daily current affairs (Akhbar)", kind="akhbar", mode="daily", times=["07:00"], enabled=False),
     ]
     return cfg
 
@@ -247,6 +274,18 @@ def effective_exams(cfg: ControlConfig, language: str | None = None) -> dict[str
     return out
 
 
+def editions_for(cfg: ControlConfig, schedule: Schedule) -> list[NewsEdition]:
+    eds = [e for e in cfg.editions if e.enabled]
+    return [e for e in eds if e.id in schedule.edition_ids] if schedule.edition_ids else eds
+
+
+def channels_for_edition(cfg: ControlConfig, edition: NewsEdition, schedule: Schedule | None = None) -> list[Channel]:
+    """Telegram channels for a newspaper: schedule override > the edition's own channels > all."""
+    ids = (schedule.channel_ids if schedule and schedule.channel_ids else None) or edition.channel_ids or None
+    chans = [c for c in cfg.channels if c.enabled and c.configured() and c.platform == "telegram"]
+    return [c for c in chans if c.id in ids] if ids else chans
+
+
 def channels_for(cfg: ControlConfig, exam_id: str, schedule: Schedule | None = None) -> list[Channel]:
     ids = (schedule.channel_ids if schedule and schedule.channel_ids else None) or next(
         (es.channel_ids for es in cfg.exams if es.exam_id == exam_id and es.channel_ids), None)
@@ -284,8 +323,22 @@ def merge_from_ui(cfg: ControlConfig, incoming: dict) -> ControlConfig:
         for f in SECRET_FIELDS & set(ch):
             ch[f] = keep(ch.get(f, ""), getattr(prev, f, "") if prev else "")
     new = ControlConfig.model_validate(incoming)
+    _normalize_edition_ids(new)
     _validate(new)
     return new
+
+
+def _normalize_edition_ids(cfg: ControlConfig) -> None:
+    """Edition ids always read '<region>-<language>' (e.g. uttar-pradesh-hi); schedules follow renames."""
+    from .akhbar import Desk
+
+    remap = {}
+    for ed in cfg.editions:
+        new_id = Desk(ed.region, ed.language).key
+        remap[ed.id] = new_id
+        ed.id = new_id
+    for s in cfg.schedules:
+        s.edition_ids = list(dict.fromkeys(remap.get(x, x) for x in s.edition_ids))
 
 
 def _validate(cfg: ControlConfig) -> None:
@@ -306,8 +359,21 @@ def _validate(cfg: ControlConfig) -> None:
             raise ValueError(f"Schedule '{s.name}': add at least one time")
         bad = [x for x in s.content_types if x not in CONTENT_TYPES] + [x for x in s.video_styles if x not in VIDEO_STYLES]
         bad += [x for x in s.channel_ids if x not in chan_ids] + [x for x in s.exam_ids if x not in exam_ids]
+        bad += [x for x in s.edition_ids if x not in {e.id for e in cfg.editions}]
         if bad:
             raise ValueError(f"Schedule '{s.name}': unknown values {bad}")
+    from .akhbar import regions
+
+    known_regions = set(regions())
+    seen = set()
+    for ed in cfg.editions:
+        if ed.region not in known_regions:
+            raise ValueError(f"Newspaper edition: unknown region '{ed.region}'")
+        if (ed.region, ed.language) in seen:
+            raise ValueError(f"Two newspaper editions for {ed.region} in the same language")
+        seen.add((ed.region, ed.language))
+        if [x for x in ed.channel_ids if x not in chan_ids]:
+            raise ValueError(f"Newspaper edition {ed.region}: unknown channel")
     for c in cfg.custom_exams:
         if not re.match(r"^[a-z0-9-]{2,40}$", c.id):
             raise ValueError(f"Custom exam id '{c.id}' must be lowercase letters, digits and hyphens")
@@ -321,5 +387,14 @@ def catalogue_info() -> dict:
         "video_styles": VIDEO_STYLES,
         "outputs": list(OUTPUTS),
         "languages": {"hi": "हिन्दी", "en": "English", "hinglish": "Hinglish"},
+        "regions": _region_choices(),
         "exams_yaml": str(PACKAGE_DIR / "exams.yaml"),
     }
+
+
+def _region_choices() -> list[dict]:
+    from .akhbar import CENTRAL, STATE_HI
+
+    return [{"id": CENTRAL, "label": "Central / National (राष्ट्रीय)"}] + [
+        {"id": r, "label": f"{r} ({hi})"} for r, hi in sorted(STATE_HI.items())
+    ]

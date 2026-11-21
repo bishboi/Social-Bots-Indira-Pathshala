@@ -38,35 +38,45 @@ Start everything with one command: the web panel, the scheduler and the Telegram
 ADMIN_PASSWORD=choose-a-password python -m pathshala_bot serve
 ```
 
-Then open http://localhost:8080 and log in as `admin`. The panel has five tabs:
+Then open http://localhost:8080 and log in as `admin`. The panel has six tabs:
 
 | Tab | What you configure |
 |---|---|
 | **Dashboard** | Upcoming runs, what's running now, recent runs with links to their PDFs and videos, and setup warnings (e.g. a missing API key) |
 | **Channels** | Any number of Telegram channels, YouTube accounts and Instagram accounts. Each has its own credentials, an on/off switch and a **Test** button. |
 | **Exams** | Turn each target exam on or off. Set its **language** (Hindi, English or Hinglish), how often it's picked, and which channels it posts to. You can also add custom exams with their own subjects and topics. |
-| **Schedules** | **Every X hours** (from a start time) or **at set times** each day, on chosen days of the week. Also: which exams, which content types, which **outputs** (shorts/reels, PDF notes, quiz questions, post + card + memory trick), which video styles, which channels, and a language override. Each schedule has **Run now** and **Dry run** (generate without posting) buttons. |
+| **Schedules** | **Every X hours** (from a start time) or **at set times** each day, on chosen days of the week. Also: which exams (or, for the newspaper, which editions), which content types, which **outputs** (shorts/reels, PDF notes, quiz questions, post + card + memory trick), which video styles, which channels, and a language override. Each schedule has **Run now** and **Dry run** (generate without posting) buttons. |
+| **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels |
 | **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, and API keys. Keys are stored on the server and only ever shown masked. |
 
 Settings are saved to `output/control.json` (readable only by the server's own user). On the first start that file is seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. The panel uses HTTP Basic auth (`ADMIN_USER` / `ADMIN_PASSWORD`), so put it behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
 
 ## Daily current-affairs newspaper (Akhbar)
 
-The newspaper is a "Daily newspaper" schedule (it's in the panel, off by default). For each chosen exam it:
+The newspaper is published **per edition**, not per exam. An edition is a **region in one language**:
 
-1. **Researches the day's news.** Claude searches the web for the last 24–48 hours and **decides what matters for that exam**. For a state PSC or police exam, state schemes, appointments and culture come first, then national and international news. For JEE/NEET it's science, health and NTA notices. It prefers official and reputable sources (PIB, government portals, major newspapers) and skips headlines it has used in the last week.
+- **State editions** (any state or UT, e.g. *Rajasthan · हिन्दी*): one paper shared by **every** exam of that state, such as the state PSC, police (SI, constable), subordinate/staff boards (patwari, clerk…), teacher recruitment and the state board. Roughly 55% is that state's news (government decisions, schemes, budget, appointments, culture, geography, recruitment notices), 30% national and 15% international.
+- **Central edition** (*Central · हिन्दी / English*): national and international news for central exams: UPSC, SSC, banking, railways, defence, CTET and NTA.
+
+Manage editions in the panel's **Newspaper** tab. Each edition has a region, a language, its own Telegram channels and an on/off switch. The defaults are Rajasthan · Hindi, Central · Hindi and Central · English (off). A "Daily newspaper" schedule (in the Schedules tab, off by default) produces one paper per selected edition. Each run:
+
+1. **Researches the day's news.** Claude searches the last 24–48 hours and **decides what matters** for that edition's readers. It prefers official sources (the state government and DIPR portals, the state PSC, PIB, RBI) and the leading papers of the region, and skips stories that edition used in the last week.
 2. **Writes the edition:** 8–12 articles, each with a headline, dateline, summary, body, key facts, an **exam angle** ("परीक्षा दृष्टि"), a related static GK fact and its sources. It adds one-liners, "did you know" facts and a 6–10 question quiz.
-3. **Checks it:** stories with no date, more than 3 days old, or with no source are dropped. The rest are ordered by exam importance.
-4. **Renders a newspaper-style A4 PDF:** a masthead with logo, date and issue number; a full-width lead story; two-column articles; boxed one-liners and "did you know"; the quiz with an answer key; plus the watermark and © footer.
-5. **Posts it to Telegram:** the PDF with today's top headlines as the caption, and optionally the quiz as polls.
+3. **Checks it:** stories with no date, more than 3 days old, or with no source are dropped. The rest are ordered by importance.
+4. **Renders a newspaper-style A4 PDF:** a masthead with logo, date, issue number and the edition name (e.g. "राजस्थान संस्करण" or "राष्ट्रीय संस्करण"); a full-width lead story; two-column articles; boxed one-liners and "did you know"; the quiz with answer key; plus the watermark and © footer.
+5. **Posts it to the edition's Telegram channels:** the PDF with today's top headlines as the caption, and optionally the quiz as polls.
 
-You can also run it by hand. To post to the exam's Telegram channels:
+You can also run it by hand:
 
 ```bash
-python -m pathshala_bot akhbar --exam rajasthan-si --publish
+python -m pathshala_bot akhbar --region Rajasthan --language hi --publish
 ```
 
-To post somewhere specific instead, use `--chat @yourchannel`. Admins can also send `/akhbar rajasthan-si` to the bot to get a preview in their own chat.
+```bash
+python -m pathshala_bot akhbar --region central --language en --chat @mychannel
+```
+
+To use an edition saved in the panel, pass `--edition rajasthan-hi`. Admins can send `/akhbar rajasthan-hi` or `/akhbar central-en` to the bot to get a preview in their own chat.
 
 ## Video styles
 
@@ -186,14 +196,14 @@ python -m pathshala_bot exams
 | `/preview [exam] [type] [style]` | admin | Generates and sends everything to *your* chat only |
 | `/generate [exam] [type] [style]` | admin | Generates and publishes to the channel, YouTube and Instagram |
 | `/history` | admin | Lists the last runs |
-| `/akhbar [exam]` | admin | Builds today's current-affairs newspaper and sends it to your chat |
+| `/akhbar [edition]` | admin | Builds today's newspaper for an edition (e.g. `rajasthan-hi`, `central-en`) and sends it to your chat |
 
 Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`.
 
 ### Hosting options
 
 - **Docker / VPS:** run `docker build -t pathshala .`, then `docker run --env-file .env -p 8080:8080 -v $PWD/data:/data pathshala`. This runs the admin panel, scheduler and bot; settings and history persist in `./data`.
-- **GitHub Actions:** `.github/workflows/post.yml` posts at 08:00 and 18:00 IST with no server, and the newspaper at 06:45 IST for the exams in the `AKHBAR_EXAMS` repository variable. This option has no admin panel: it uses the `.env` values. Add the `.env` values as repository secrets. You can also run it manually from the Actions tab and pick the exam, format and platforms.
+- **GitHub Actions:** `.github/workflows/post.yml` posts at 08:00 and 18:00 IST with no server, and the newspaper at 06:45 IST for the editions in the `AKHBAR_EDITIONS` repository variable (e.g. `Rajasthan:hi,central:hi,central:en`). This option has no admin panel: it uses the `.env` values. Add the `.env` values as repository secrets. You can also run it manually from the Actions tab and pick the exam, format and platforms.
 
 ## Credentials
 

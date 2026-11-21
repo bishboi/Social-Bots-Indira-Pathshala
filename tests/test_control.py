@@ -202,8 +202,65 @@ def test_akhbar_render_and_publish(ctl, monkeypatch, tmp_path):
     monkeypatch.setattr("time.sleep", lambda s: None)
     object.__setattr__(akhbar.settings, "telegram_bot_token", "1:x")
     ch = ctl.Channel(name="T", platform="telegram", chat_id="@t")
-    res = akhbar.run(load_exams()["rajasthan-si"], channels=[ch], from_json=AKHBAR_FIXTURE)
+    res = akhbar.run(akhbar.Desk("Rajasthan", "hi"), channels=[ch], from_json=AKHBAR_FIXTURE)
     assert res.ok and res.pdf.read_bytes()[:4] == b"%PDF"
     assert calls[0] == "sendDocument" and calls.count("sendPoll") == len(res.edition.quiz)
     manifest = json.loads((res.run_dir / "manifest.json").read_text())
     assert manifest["kind"] == "akhbar" and len(manifest["articles"]) == len(res.edition.articles)
+    assert manifest["edition"] == "rajasthan-hi" and manifest["region"] == "Rajasthan"
+    html = next(res.run_dir.glob("*.html")).read_text(encoding="utf-8")
+    assert "राजस्थान संस्करण" in html
+
+
+def test_editions_routing_and_validation(ctl):
+    from pathshala_bot import akhbar
+
+    cfg = ctl.load()
+    assert {(e.region, e.language) for e in cfg.editions} >= {("Rajasthan", "hi"), ("central", "hi")}
+    raj_ch = ctl.Channel(name="Raj", platform="telegram", chat_id="@raj")
+    nat_ch = ctl.Channel(name="Nat", platform="telegram", chat_id="@nat")
+    yt = ctl.Channel(name="YT", platform="youtube", client_id="a", client_secret="b", refresh_token="c")
+    cfg.channels = [raj_ch, nat_ch, yt]
+    raj = next(e for e in cfg.editions if e.region == "Rajasthan")
+    raj.channel_ids = [raj_ch.id]
+    central = next(e for e in cfg.editions if e.region == "central" and e.language == "hi")
+    assert [c.name for c in ctl.channels_for_edition(cfg, raj)] == ["Raj"]
+    assert [c.name for c in ctl.channels_for_edition(cfg, central)] == ["Raj", "Nat"]  # telegram only, all
+    sched = ctl.Schedule(name="paper", kind="akhbar", edition_ids=[central.id])
+    assert ctl.editions_for(cfg, sched) == [central]
+    # same paper key for a region+language, whatever the edition id
+    assert akhbar.Desk("Rajasthan", "hi").key == raj.desk().key == "rajasthan-hi"
+    assert akhbar.Desk("central", "en").label() == "National edition"
+    view = ctl.public_view(cfg)
+    view["editions"].append({"id": "x", "region": "Rajasthan", "language": "hi", "enabled": True, "channel_ids": []})
+    with pytest.raises(ValueError, match="same language"):
+        ctl.merge_from_ui(cfg, view)
+    view["editions"][-1].update(region="Uttar Pradesh", id="stale-id")
+    sched_view = view["schedules"][1]
+    sched_view["edition_ids"] = ["stale-id"]
+    merged = ctl.merge_from_ui(cfg, view)
+    assert merged.editions[-1].id == "uttar-pradesh-hi" and merged.schedules[1].edition_ids == ["uttar-pradesh-hi"]
+    view["editions"][-1]["region"] = "Atlantis"
+    with pytest.raises(ValueError, match="unknown region"):
+        ctl.merge_from_ui(cfg, view)
+
+
+def test_akhbar_schedule_runs_each_edition(ctl, monkeypatch):
+    from pathshala_bot import akhbar, scheduler
+
+    cfg = ctl.load()
+    cfg.channels = [ctl.Channel(name="T", platform="telegram", chat_id="@t")]
+    for e in cfg.editions:
+        e.enabled = e.language == "hi"
+    s = ctl.Schedule(name="paper", kind="akhbar", mode="daily", times=["07:00"])
+    cfg.schedules = [s]
+    ctl.save(cfg)
+    desks = []
+
+    class R:
+        def summary(self):
+            return "ok"
+
+    monkeypatch.setattr(akhbar, "run", lambda desk, channels=None, questions=True: desks.append((desk.region, desk.language, len(channels))) or R())
+    scheduler.execute(s.id)
+    assert sorted(desks) == [("Rajasthan", "hi", 1), ("central", "hi", 1)]

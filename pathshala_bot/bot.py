@@ -9,7 +9,7 @@ Commands
   /generate [exam] [type] [style]  admin: generate and publish to the channel + YouTube + Instagram
   /quiz [exam]             anyone: replay a random quiz question from past content (no AI call)
   /history                 admin: last runs
-  /akhbar [exam]           admin: build today's current-affairs paper and send it here
+  /akhbar [edition]        admin: build today's paper (e.g. rajasthan-hi, central-en) and send it here
 """
 
 from __future__ import annotations
@@ -152,29 +152,32 @@ async def scheduled_post(ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def akhbar_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin: build today's current-affairs paper for an exam and send it to this chat."""
+    """Admin: build today's paper for an edition (e.g. /akhbar rajasthan-hi, /akhbar central-en) and send it here."""
     if not _is_admin(update):
         await update.message.reply_text("Admins only.")
         return
-    from . import akhbar, control
+    from . import control
 
-    exam_id, _, _ = _parse_args(ctx.args)
     cfg = control.load()
-    pool = control.effective_exams(cfg) or load_exams()
-    exam = pool.get(exam_id) if exam_id else next(iter(pool.values()))
-    if exam is None:
-        await update.message.reply_text("Unknown or disabled exam.")
+    arg = " ".join(ctx.args).strip().lower()
+    eds = [e for e in cfg.editions if e.enabled] or cfg.editions
+    ed = next((e for e in cfg.editions if e.id == arg or e.region.lower() == arg), None) if arg else (eds[0] if eds else None)
+    if ed is None:
+        await update.message.reply_text("Editions: " + ", ".join(e.id for e in cfg.editions))
         return
     chat = str(update.effective_chat.id)
     preview_channel = control.Channel(name="preview", platform="telegram", chat_id=chat)
     if _run_lock.locked():
         await update.message.reply_text("⏳ A run is already in progress, please wait.")
         return
+    desk = ed.desk()
 
     async def job():
+        from . import akhbar
+
         async with _run_lock:
-            await ctx.bot.send_message(chat, f"🗞 Searching today's news for {exam.short_name}… this takes a few minutes.")
-            res = await asyncio.to_thread(akhbar.run, exam, [preview_channel], False)
+            await ctx.bot.send_message(chat, f"🗞 Searching today's news for the {desk.label()}… this takes a few minutes.")
+            res = await asyncio.to_thread(akhbar.run, desk, [preview_channel], False)
             await ctx.bot.send_message(chat, ("✅ " if res.ok else "⚠️ ") + res.summary()[:4000])
 
     ctx.application.create_task(job())
