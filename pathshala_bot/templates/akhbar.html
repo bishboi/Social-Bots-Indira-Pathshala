@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="{{ 'hi' if hi else 'en' }}">
+<head>
+<meta charset="utf-8">
+<title>{{ title }} · {{ date_str }}</title>
+<meta name="author" content="{{ owner }}">
+<meta name="description" content="{{ title }} · {{ exam.name }} · {{ date_str }}">
+<style>
+  @font-face { font-family: "Serif"; src: url("{{ serif_regular }}"); font-weight: 400; }
+  @font-face { font-family: "Serif"; src: url("{{ serif_bold }}"); font-weight: 700; }
+  @font-face { font-family: "Sans"; src: url("{{ sans_regular }}"); font-weight: 400; }
+  @font-face { font-family: "Sans"; src: url("{{ sans_bold }}"); font-weight: 700; }
+  @page {
+    size: A4; margin: 12mm 11mm 14mm 11mm;
+    @bottom-left { content: "© {{ year }} {{ owner }}. All rights reserved."; font: 7.5pt "Sans"; color: #666; }
+    @bottom-center { content: "{{ title }} · {{ date_str }}"; font: 7.5pt "Sans"; color: #666; }
+    @bottom-right { content: counter(page) " / " counter(pages); font: 7.5pt "Sans"; color: #666; }
+  }
+  @page :first { margin-top: 10mm; }
+  :root { --ink: #111; --muted: #555; --rule: #222; --accent: #b3261e; --soft: #f5f1e8; --navy: #0e1630; --saffron: #e8821e; }
+  body { font-family: "Serif", serif; color: var(--ink); font-size: 9.6pt; line-height: 1.45; orphans: 2; widows: 2; }
+  p { margin: 0 0 5px; text-align: justify; hyphens: auto; }
+
+  /* masthead */
+  .mast { display: flex; align-items: center; border-bottom: 3px double var(--rule); padding-bottom: 4px; }
+  .mast img { width: 22mm; height: 22mm; flex: none; }
+  .mast .name { flex: 1; text-align: center; }
+  .mast h1 { font: 700 34pt/1.05 "Serif"; margin: 0; letter-spacing: 0.5pt; }
+  .mast .tag { font: 9pt "Sans"; color: var(--muted); margin-top: 2px; }
+  .mast .right { width: 34mm; text-align: right; font: 8pt/1.4 "Sans"; color: var(--muted); }
+  .mast .right b { color: var(--ink); }
+  .strip { display: flex; justify-content: space-between; font: 8pt "Sans"; border-bottom: 1px solid var(--rule); padding: 3px 0; margin-bottom: 8px; }
+  .strip .ex { color: var(--accent); font-weight: 700; }
+
+  .kicker { font: 700 7.5pt "Sans"; color: var(--accent); text-transform: uppercase; letter-spacing: .6pt; }
+  .dateline { font-weight: 700; }
+  .standfirst { font-style: italic; color: #333; margin-bottom: 4px; }
+  .facts { background: var(--soft); border-left: 3px solid var(--saffron); padding: 4px 8px; margin: 5px 0; font: 8.6pt/1.4 "Sans"; break-inside: avoid; }
+  .facts ul { margin: 2px 0 0; padding-left: 14px; }
+  .angle { border: 1px solid #d7cdb8; border-radius: 4px; padding: 4px 8px; font: 8.6pt/1.4 "Sans"; margin: 4px 0; break-inside: avoid; }
+  .angle b { color: var(--navy); }
+  .src { font: 7pt "Sans"; color: #777; word-break: break-all; margin-top: 2px; }
+
+  /* lead story spans the page */
+  .lead { border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin-bottom: 8px; }
+  .lead h2 { font: 700 21pt/1.15 "Serif"; margin: 2px 0 4px; }
+  .lead .cols { columns: 2; column-gap: 7mm; column-rule: 1px solid #ccc; }
+
+  /* the rest flows in columns */
+  .paper { columns: 2; column-gap: 7mm; column-rule: 1px solid #ccc; }
+  article { break-inside: auto; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #ccc; }
+  article h3 { font: 700 13pt/1.2 "Serif"; margin: 1px 0 3px; }
+  .head { break-inside: avoid; break-after: avoid; }
+  .box { break-inside: avoid; border: 1.5px solid var(--rule); padding: 6px 9px; margin-bottom: 8px; background: #fff; }
+  .box h4 { font: 700 11pt "Serif"; margin: 0 0 4px; border-bottom: 1px solid var(--rule); padding-bottom: 2px; }
+  .box ol, .box ul { margin: 0; padding-left: 16px; font: 8.6pt/1.45 "Sans"; }
+  .box li { margin-bottom: 2px; }
+
+  .quiz { break-before: auto; }
+  .quiz h2 { font: 700 15pt "Serif"; border-bottom: 3px double var(--rule); margin: 6px 0; }
+  .qs { columns: 2; column-gap: 7mm; }
+  .q { break-inside: avoid; margin-bottom: 7px; font: 9pt/1.4 "Sans"; }
+  .q ol { list-style: upper-alpha; margin: 2px 0; padding-left: 18px; }
+  .key { font: 8.4pt/1.4 "Sans"; border-top: 1px solid var(--rule); margin-top: 6px; padding-top: 4px; }
+
+  .wm { position: fixed; top: 50%; left: 50%; width: 120mm; height: 118mm; margin: -59mm 0 0 -60mm; z-index: -1;
+        display: flex; flex-direction: column; align-items: center; opacity: 0.05; }
+  .wm img { width: 92mm; height: 92mm; }
+  .wm div { margin-top: 7mm; font: 700 22pt "Sans"; letter-spacing: 3pt; white-space: nowrap; }
+  .rights { font: 7.5pt/1.4 "Sans"; color: var(--muted); border-top: 1px solid var(--rule); margin-top: 8px; padding-top: 4px; }
+</style>
+</head>
+<body>
+{% if watermark %}<div class="wm">{% if logo_url %}<img src="{{ logo_url }}">{% endif %}<div>{{ brand | upper }}</div></div>{% endif %}
+
+<div class="mast">
+  {% if logo_url %}<img src="{{ logo_url }}">{% else %}<div style="width:22mm"></div>{% endif %}
+  <div class="name">
+    <h1>{{ title }}</h1>
+    <div class="tag">{{ ed.tagline }}</div>
+  </div>
+  <div class="right"><b>{{ date_str }}</b><br>{{ 'अंक' if hi else 'Issue' }} {{ issue_no }}<br>{{ handle }}</div>
+</div>
+<div class="strip">
+  <span class="ex">{{ exam.name }}</span>
+  <span>{{ 'परीक्षा-उपयोगी दैनिक करंट अफेयर्स' if hi else 'Exam-focused daily current affairs' }}</span>
+  <span>{{ brand }}</span>
+</div>
+
+{% set lead = ed.articles[0] %}
+<div class="lead">
+  <div class="kicker">{{ cat(lead.category) }}</div>
+  <h2>{{ lead.headline }}</h2>
+  <div class="standfirst">{{ lead.summary }}</div>
+  <div class="cols">
+    {% for p in lead.body %}<p>{% if loop.first %}<span class="dateline">{{ lead.dateline }}: </span>{% endif %}{{ p }}</p>{% endfor %}
+    <div class="facts"><b>{{ 'मुख्य तथ्य' if hi else 'Key facts' }}</b><ul>{% for f in lead.key_facts %}<li>{{ f }}</li>{% endfor %}</ul></div>
+    <div class="angle"><b>{{ 'परीक्षा दृष्टि:' if hi else 'Exam angle:' }}</b> {{ lead.exam_angle }}{% if lead.static_link %}<br><b>{{ 'स्टैटिक जीके:' if hi else 'Static GK:' }}</b> {{ lead.static_link }}{% endif %}</div>
+    <div class="src">{{ 'स्रोत' if hi else 'Source' }}: {% for s in lead.sources %}{{ s.url }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  </div>
+</div>
+
+<div class="paper">
+  {% for a in ed.articles[1:] %}
+  <article>
+    <div class="head">
+      <div class="kicker">{{ cat(a.category) }}</div>
+      <h3>{{ a.headline }}</h3>
+      <div class="standfirst">{{ a.summary }}</div>
+    </div>
+    {% for p in a.body %}<p>{% if loop.first %}<span class="dateline">{{ a.dateline }}: </span>{% endif %}{{ p }}</p>{% endfor %}
+    <div class="facts"><b>{{ 'मुख्य तथ्य' if hi else 'Key facts' }}</b><ul>{% for f in a.key_facts %}<li>{{ f }}</li>{% endfor %}</ul></div>
+    <div class="angle"><b>{{ 'परीक्षा दृष्टि:' if hi else 'Exam angle:' }}</b> {{ a.exam_angle }}{% if a.static_link %}<br><b>{{ 'स्टैटिक जीके:' if hi else 'Static GK:' }}</b> {{ a.static_link }}{% endif %}</div>
+    <div class="src">{{ 'स्रोत' if hi else 'Source' }}: {% for s in a.sources %}{{ s.url }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  </article>
+  {% if loop.index == 2 and ed.one_liners %}
+  <div class="box"><h4>{{ 'एक पंक्ति में' if hi else 'In one line' }}</h4><ol>{% for o in ed.one_liners %}<li>{{ o }}</li>{% endfor %}</ol></div>
+  {% endif %}
+  {% if loop.index == 5 and ed.did_you_know %}
+  <div class="box"><h4>{{ 'क्या आप जानते हैं?' if hi else 'Did you know?' }}</h4><ul>{% for d in ed.did_you_know %}<li>{{ d }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  {% endfor %}
+  {% if ed.articles|length < 3 and ed.one_liners %}
+  <div class="box"><h4>{{ 'एक पंक्ति में' if hi else 'In one line' }}</h4><ol>{% for o in ed.one_liners %}<li>{{ o }}</li>{% endfor %}</ol></div>
+  {% endif %}
+  {% if ed.articles|length < 6 and ed.did_you_know %}
+  <div class="box"><h4>{{ 'क्या आप जानते हैं?' if hi else 'Did you know?' }}</h4><ul>{% for d in ed.did_you_know %}<li>{{ d }}</li>{% endfor %}</ul></div>
+  {% endif %}
+</div>
+
+{% if ed.quiz %}
+<div class="quiz">
+  <h2>{{ 'आज का क्विज़' if hi else "Today's Quiz" }}</h2>
+  <div class="qs">
+    {% for q in ed.quiz %}
+    <div class="q"><b>{{ loop.index }}. {{ q.question }}</b>
+      <ol>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ol>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="key"><b>{{ 'उत्तर' if hi else 'Answers' }}:</b>
+    {% for q in ed.quiz %}{{ loop.index }}-{{ "ABCDEFGHIJ"[q.correct_index] }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="rights">© {{ year }} {{ owner }} ({{ handle }}). {{ 'सर्वाधिकार सुरक्षित। निःशुल्क व्यक्तिगत अध्ययन हेतु साझा कर सकते हैं; बेचना या बिना अनुमति पुनः प्रकाशित करना वर्जित है। समाचार सारांश ऊपर दिए गए स्रोतों पर आधारित हैं।' if hi else 'All rights reserved. Free to share for personal study; selling or republishing without permission is prohibited. News summaries are based on the sources listed with each story.' }}</div>
+</body>
+</html>

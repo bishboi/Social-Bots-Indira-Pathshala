@@ -40,6 +40,10 @@ class Settings:
     # Copyright holder shown in PDFs (defaults to the brand name)
     copyright_owner: str = field(default_factory=lambda: _env("COPYRIGHT_OWNER"))
     pdf_watermark: bool = field(default_factory=lambda: _bool("PDF_WATERMARK", True))
+    # Daily current-affairs newspaper
+    akhbar_title_hi: str = field(default_factory=lambda: _env("AKHBAR_TITLE_HI", "पाठशाला समाचार"))
+    akhbar_title_en: str = field(default_factory=lambda: _env("AKHBAR_TITLE_EN", "Pathshala Times"))
+    akhbar_articles: int = field(default_factory=lambda: int(_env("AKHBAR_ARTICLES", "10")))
 
     # Claude
     claude_model: str = field(default_factory=lambda: _env("CLAUDE_MODEL", "claude-opus-5-5"))

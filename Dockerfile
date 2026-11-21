@@ -15,4 +15,6 @@ COPY . .
 
 ENV OUTPUT_DIR=/data/output DB_PATH=/data/output/history.sqlite3
 VOLUME ["/data"]
-CMD ["python", "-m", "pathshala_bot", "bot"]
+EXPOSE 8080
+# Admin UI + scheduler + Telegram bot. Requires ADMIN_PASSWORD; put it behind HTTPS if exposed publicly.
+CMD ["python", "-m", "pathshala_bot", "serve", "--host", "0.0.0.0", "--port", "8080"]

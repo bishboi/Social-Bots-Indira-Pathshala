@@ -76,7 +76,11 @@ class Telegram:
         )
 
 
-def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: str | None = None) -> dict:
+def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: str | None = None,
+            include: set[str] | None = None, send_video: bool | None = None) -> dict:
+    """include: subset of {"card", "questions", "pdf", "short"} (default: all present assets)."""
+    include = set(include or ("card", "questions", "pdf", "short"))
+    send_video = settings.telegram_send_video if send_video is None else send_video
     tg = Telegram()
     chat = chat_id or exam.telegram_chat or settings.telegram_channel_id
     if not chat:
@@ -85,7 +89,9 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
     result: dict = {"chat_id": chat, "messages": []}
 
     caption = f"<b>{safe_html(pkg.hook)}</b>\n\n{safe_html(pkg.telegram_post)}\n\n{tags}"
-    if "card" in assets and len(caption) <= 1024:
+    if "card" not in include:
+        pass
+    elif "card" in assets and len(caption) <= 1024:
         result["messages"].append(tg.send_photo(chat, assets["card"], caption)["message_id"])
     else:
         if "card" in assets:
@@ -93,21 +99,21 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
         result["messages"].append(tg.send_message(chat, caption[:4096])["message_id"])
 
     m = pkg.mnemonic
-    if m is not None and m.decode:
+    if m is not None and m.decode and "card" in include:
         head = "🧠 <b>याद रखने की ट्रिक</b>" if exam.language == "hi" else "🧠 <b>Memory trick</b>"
         lines = "\n".join(f"▫️ <b>{safe_html(c.cue)}</b> → {safe_html(c.stands_for)}" for c in m.decode)
         tip = f"\n\n💡 {safe_html(m.tip)}" if m.tip else ""
         result["messages"].append(tg.send_message(chat, f"{head}\n\n<b>“{safe_html(m.trick)}”</b>\n\n{lines}{tip}"[:4096])["message_id"])
 
-    for q in pkg.mcqs:
+    for q in (pkg.mcqs if "questions" in include else []):
         result["messages"].append(tg.send_quiz(chat, q.question, q.options, q.correct_index, q.explanation)["message_id"])
         time.sleep(1.2)
 
-    if "pdf" in assets:
+    if "pdf" in assets and "pdf" in include:
         cap = f"📄 <b>{safe_html(pkg.title)}</b>\n{safe_html(pkg.subject)}\nFree PDF notes by {safe_html(settings.brand_name)}"
         result["messages"].append(tg.send_document(chat, assets["pdf"], cap)["message_id"])
 
-    if "video" in assets and settings.telegram_send_video:
+    if "video" in assets and "short" in include and send_video:
         cap = f"🎬 <b>{safe_html(pkg.short.title)}</b>"
         result["messages"].append(tg.send_video(chat, assets["video"], cap)["message_id"])
     return result

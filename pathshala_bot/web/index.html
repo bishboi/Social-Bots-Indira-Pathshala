@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pathshala Control</title>
+<style>
+  :root {
+    --bg: #f5f6fa; --panel: #ffffff; --ink: #141833; --muted: #646a86; --line: #e3e6f0;
+    --accent: #ff8a1f; --accent-ink: #1a1200; --navy: #16204a; --ok: #1f9d55; --warn: #c27c0e; --bad: #d1343b;
+    --chip: #eef0f7; --chip-on: #16204a; --chip-on-ink: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1222; --panel: #171b31; --ink: #e8eaf6; --muted: #9aa0bf; --line: #2a2f4d; --chip: #23284a; --chip-on: #ff8a1f; --chip-on-ink: #1a1200; --navy: #c7cdf5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Devanagari", sans-serif; background: var(--bg); color: var(--ink); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1100px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 16px; margin-right: auto; }
+  nav { max-width: 1100px; margin: 0 auto; padding: 0 16px; display: flex; gap: 4px; overflow-x: auto; }
+  nav button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 12px; font: inherit; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  nav button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 10px; font-size: 15px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  input, select, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; }
+  textarea { min-height: 90px; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 7px 12px; border-radius: 7px; cursor: pointer; font: inherit; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .btn.danger { color: var(--bad); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 0; background: var(--chip); color: var(--ink); padding: 4px 10px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12.5px; }
+  .chip.on { background: var(--chip-on); color: var(--chip-on-ink); }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--chip); }
+  .pill.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .pill.bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+  .pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .muted { color: var(--muted); font-size: 12.5px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--ink); }
+  .toggle input { width: auto; }
+  .err { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border: 1px solid var(--bad); color: var(--ink); padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; white-space: pre-wrap; }
+  .flash { background: color-mix(in srgb, var(--ok) 14%, var(--panel)); border: 1px solid var(--ok); padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
+  .table-wrap { overflow-x: auto; }
+  pre { white-space: pre-wrap; font-size: 12px; margin: 4px 0 0; color: var(--muted); }
+  .section-title { display: flex; justify-content: space-between; align-items: center; margin: 4px 0 10px; }
+  .section-title h2 { margin: 0; font-size: 18px; }
+  @media (max-width: 600px) { .hide-sm { display: none; } }
+</style>
+<script defer src="/static/alpine-3.14.1.min.js"></script>
+</head>
+<body x-data="app()" x-init="init()">
+<header>
+  <div class="bar">
+    <div class="brand" x-text="(cfg?.general?.brand_name || 'Pathshala') + ' · Control'"></div>
+    <span class="pill" :class="status.worker?.running ? 'warn' : 'ok'" x-text="status.worker?.running ? 'Running: ' + status.worker.running.schedule : 'Idle'"></span>
+    <span class="muted" x-show="dirty">Unsaved changes</span>
+    <button class="btn primary" :disabled="!dirty || saving" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
+  </div>
+  <nav>
+    <template x-for="t in tabs"><button :class="tab===t.id && 'on'" @click="tab=t.id" x-text="t.label"></button></template>
+  </nav>
+</header>
+
+<template x-if="cfg"><main>
+  <div class="err" x-show="error" x-text="error"></div>
+  <div class="flash" x-show="flash" x-text="flash"></div>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section x-show="tab==='dash'">
+    <div class="card" x-show="warnings().length">
+      <h3>Needs attention</h3>
+      <template x-for="w in warnings()"><div class="row"><span class="pill bad">!</span><span x-text="w"></span></div></template>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Upcoming runs</h3>
+        <template x-for="j in status.jobs || []"><div class="row" style="justify-content:space-between"><span x-text="j.name"></span><span class="muted" x-text="fmt(j.next_run)"></span></div></template>
+        <div class="muted" x-show="!(status.jobs||[]).length">No active schedules.</div>
+      </div>
+      <div class="card">
+        <h3>Connected channels</h3>
+        <template x-for="c in cfg?.channels || []">
+          <div class="row" style="justify-content:space-between"><span x-text="icon(c.platform) + ' ' + c.name"></span>
+            <span class="pill" :class="c.enabled ? 'ok' : ''" x-text="c.enabled ? 'on' : 'off'"></span></div>
+        </template>
+        <div class="muted" x-show="!(cfg?.channels||[]).length">No channels yet.</div>
+      </div>
+    </div>
+    <div class="card" x-show="(status.worker?.last||[]).length">
+      <h3>Latest results</h3>
+      <template x-for="l in (status.worker?.last||[]).slice(0,3)">
+        <div style="margin-bottom:8px"><b x-text="l.schedule"></b> <span class="muted" x-text="fmt(l.finished)"></span><pre x-text="l.summary"></pre></div>
+      </template>
+    </div>
+    <div class="card">
+      <h3>Recent runs</h3>
+      <div class="table-wrap"><table>
+        <tr><th>When</th><th>Exam</th><th class="hide-sm">Type</th><th>Topic / lead story</th><th>Status</th><th>Files</th></tr>
+        <template x-for="r in status.runs || []">
+          <tr>
+            <td x-text="fmt(r.created_at)"></td><td x-text="r.exam_id"></td><td class="hide-sm" x-text="r.content_type"></td>
+            <td x-text="r.topic"></td>
+            <td><span class="pill" :class="{ok: r.status==='ok', warn: r.status==='partial', bad: r.status==='failed'}" x-text="r.status"></span></td>
+            <td><template x-for="f in r.files"><a :href="'/files/' + r.run + '/' + f" target="_blank" x-text="f" style="display:block"></a></template></td>
+          </tr>
+        </template>
+      </table></div>
+      <div class="muted" x-show="!(status.runs||[]).length">Nothing has run yet. Use “Run now” on a schedule.</div>
+    </div>
+  </section>
+
+  <!-- ============ CHANNELS ============ -->
+  <section x-show="tab==='channels'">
+    <div class="section-title"><h2>Channels</h2>
+      <div class="row">
+        <button class="btn" @click="addChannel('telegram')">+ Telegram</button>
+        <button class="btn" @click="addChannel('youtube')">+ YouTube</button>
+        <button class="btn" @click="addChannel('instagram')">+ Instagram</button>
+      </div>
+    </div>
+    <p class="muted">Telegram channels all use the bot token from Settings; add the bot as an admin of each channel. Save before testing a new channel.</p>
+    <template x-for="(c, i) in cfg.channels" :key="c.id">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <b x-text="icon(c.platform) + ' ' + c.platform"></b>
+          <div class="row">
+            <label class="toggle"><input type="checkbox" x-model="c.enabled" @change="touch()"> enabled</label>
+            <button class="btn" @click="testChannel(c)">Test</button>
+            <button class="btn danger" @click="cfg.channels.splice(i,1); touch()">Remove</button>
+          </div>
+        </div>
+        <div class="grid">
+          <div><label>Name</label><input x-model="c.name" @input="touch()"></div>
+          <template x-if="c.platform==='telegram'"><div><label>Channel (@username or -100… id)</label><input x-model="c.chat_id" @input="touch()"></div></template>
+          <template x-if="c.platform==='telegram'"><div><label>&nbsp;</label><label class="toggle"><input type="checkbox" x-model="c.send_video" @change="touch()"> also post shorts here</label></div></template>
+          <template x-if="c.platform==='youtube'"><div><label>OAuth client ID</label><input x-model="c.client_id" @input="touch()"></div></template>
+          <template x-if="c.platform==='youtube'"><div><label>Client secret</label><input type="password" x-model="c.client_secret" @input="touch()" placeholder="unchanged"></div></template>
+          <template x-if="c.platform==='youtube'"><div><label>Refresh token (scripts/youtube_auth.py)</label><input type="password" x-model="c.refresh_token" @input="touch()" placeholder="unchanged"></div></template>
+          <template x-if="c.platform==='youtube'"><div><label>Privacy</label><select x-model="c.privacy" @change="touch()"><option>public</option><option>unlisted</option><option>private</option></select></div></template>
+          <template x-if="c.platform==='instagram'"><div><label>Instagram user ID</label><input x-model="c.user_id" @input="touch()"></div></template>
+          <template x-if="c.platform==='instagram'"><div><label>Access token</label><input type="password" x-model="c.access_token" @input="touch()" placeholder="unchanged"></div></template>
+        </div>
+        <div class="muted" x-show="tests[c.id]" x-text="tests[c.id]" style="margin-top:8px"></div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ============ EXAMS ============ -->
+  <section x-show="tab==='exams'">
+    <div class="section-title"><h2>Target exams</h2><button class="btn" @click="newExam()">+ Custom exam</button></div>
+    <div class="card"><div class="table-wrap"><table>
+      <tr><th>On</th><th>Exam</th><th>Language</th><th>Weight</th><th>Post to channels <span class="muted">(none = all)</span></th></tr>
+      <template x-for="es in cfg.exams" :key="es.exam_id">
+        <tr>
+          <td><input type="checkbox" x-model="es.enabled" @change="touch()" style="width:auto"></td>
+          <td><b x-text="examName(es.exam_id)"></b><div class="muted" x-text="(examDefs[es.exam_id]?.subjects||[]).join(' · ')"></div></td>
+          <td style="min-width:160px"><select x-model="es.language" @change="es.language = es.language || null; touch()">
+            <option value="" x-text="'Default (' + langName(examDefs[es.exam_id]?.language) + ')'"></option>
+            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="es.language===k"></option></template>
+          </select></td>
+          <td style="width:80px"><input type="number" min="0" step="0.5" x-model.number="es.weight" @input="touch()"></td>
+          <td><div class="chips"><template x-for="c in cfg.channels"><button class="chip" :class="es.channel_ids.includes(c.id) && 'on'" @click="toggle(es.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div></td>
+        </tr>
+      </template>
+    </table></div>
+    <p class="muted">Weight = how often an exam is picked relative to the others. Built-in exams and their syllabus seeds live in exams.yaml.</p></div>
+
+    <template x-for="(ce, i) in cfg.custom_exams" :key="i">
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><h3>Custom exam</h3><button class="btn danger" @click="removeCustom(i)">Remove</button></div>
+        <div class="grid">
+          <div><label>ID (lowercase, e.g. rajasthan-patwari)</label><input x-model="ce.id" @input="touch()"></div>
+          <div><label>Full name</label><input x-model="ce.name" @input="touch()"></div>
+          <div><label>Short name</label><input x-model="ce.short_name" @input="touch()"></div>
+          <div><label>Language</label><select x-model="ce.language" @change="touch()"><template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="ce.language===k"></option></template></select></div>
+          <div style="grid-column: 1/-1"><label>Audience</label><input x-model="ce.audience" @input="touch()"></div>
+          <div style="grid-column: 1/-1"><label>Subjects — one per line: <code>Subject: topic one; topic two</code></label>
+            <textarea :value="subjectsText(ce)" @change="ce.subjects = parseSubjects($event.target.value); touch()"></textarea></div>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ============ SCHEDULES ============ -->
+  <section x-show="tab==='schedules'">
+    <div class="section-title"><h2>Schedules</h2>
+      <div class="row"><button class="btn" @click="addSchedule('content')">+ Content schedule</button><button class="btn" @click="addSchedule('akhbar')">+ Daily newspaper</button></div>
+    </div>
+    <template x-for="(s, i) in cfg.schedules" :key="s.id">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <div class="row"><b x-text="s.kind==='akhbar' ? '🗞 Current-affairs newspaper' : '📚 Content'"></b>
+            <span class="pill" x-text="describe(s)"></span></div>
+          <div class="row">
+            <label class="toggle"><input type="checkbox" x-model="s.enabled" @change="touch()"> enabled</label>
+            <button class="btn" @click="runNow(s, false)" :disabled="dirty" title="Save first">Run now</button>
+            <button class="btn" @click="runNow(s, true)" :disabled="dirty" title="Generate without posting">Dry run</button>
+            <button class="btn danger" @click="cfg.schedules.splice(i,1); touch()">Remove</button>
+          </div>
+        </div>
+        <div class="grid">
+          <div><label>Name</label><input x-model="s.name" @input="touch()"></div>
+          <div><label>Repeat</label><select x-model="s.mode" @change="touch()"><option value="interval">Every X hours</option><option value="daily">At set times each day</option></select></div>
+          <template x-if="s.mode==='interval'"><div><label>Every (hours)</label><input type="number" min="0.25" step="0.25" x-model.number="s.every_hours" @input="touch()"></div></template>
+          <template x-if="s.mode==='interval'"><div><label>Starting at (HH:MM)</label><input x-model="s.start_at" @input="touch()" placeholder="07:00"></div></template>
+          <template x-if="s.mode==='daily'"><div><label>Times (HH:MM, comma separated)</label><input :value="s.times.join(', ')" @change="s.times = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div></template>
+          <div><label>Language</label><select x-model="s.language" @change="s.language = s.language || null; touch()">
+            <option value="">Exam's language</option>
+            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="s.language===k"></option></template></select></div>
+        </div>
+        <div style="margin-top:10px"><label>Days</label><div class="chips">
+          <template x-for="d in ['mon','tue','wed','thu','fri','sat','sun']"><button class="chip" :class="s.days.includes(d) && 'on'" @click="toggle(s.days, d)" x-text="d"></button></template></div></div>
+        <div style="margin-top:10px"><label x-text="s.kind==='akhbar' ? 'Exams (one paper per exam; none = all enabled)' : 'Exams (none = any enabled exam)'"></label><div class="chips">
+          <template x-for="es in cfg.exams.filter(e=>e.enabled)"><button class="chip" :class="s.exam_ids.includes(es.exam_id) && 'on'" @click="toggle(s.exam_ids, es.exam_id)" x-text="examShort(es.exam_id)"></button></template></div></div>
+        <template x-if="s.kind==='content'"><div>
+          <div style="margin-top:10px"><label>What to create &amp; post</label><div class="chips">
+            <button class="chip" :class="s.outputs.short && 'on'" @click="s.outputs.short=!s.outputs.short; touch()">🎬 Shorts / Reels</button>
+            <button class="chip" :class="s.outputs.pdf && 'on'" @click="s.outputs.pdf=!s.outputs.pdf; touch()">📄 PDF notes</button>
+            <button class="chip" :class="s.outputs.questions && 'on'" @click="s.outputs.questions=!s.outputs.questions; touch()">❓ Quiz questions</button>
+            <button class="chip" :class="s.outputs.card && 'on'" @click="s.outputs.card=!s.outputs.card; touch()">🖼 Post + card + memory trick</button>
+          </div></div>
+          <div style="margin-top:10px"><label>Content types (none = automatic)</label><div class="chips">
+            <template x-for="(v,k) in catalogue.content_types"><button class="chip" :title="v" :class="s.content_types.includes(k) && 'on'" @click="toggle(s.content_types, k)" x-text="k"></button></template></div></div>
+          <div style="margin-top:10px" x-show="s.outputs.short"><label>Video styles (none = automatic)</label><div class="chips">
+            <template x-for="(v,k) in catalogue.video_styles"><button class="chip" :title="v" :class="s.video_styles.includes(k) && 'on'" @click="toggle(s.video_styles, k)" x-text="k"></button></template></div></div>
+        </div></template>
+        <template x-if="s.kind==='akhbar'"><div style="margin-top:10px">
+          <label class="toggle"><input type="checkbox" x-model="s.outputs.questions" @change="touch()"> also post the day's quiz as Telegram polls</label>
+          <p class="muted">The AI decides which news matters for each exam. Each paper is posted as a PDF to the Telegram channels below.</p>
+        </div></template>
+        <div style="margin-top:10px"><label>Channels (none = each exam's channels)</label><div class="chips">
+          <template x-for="c in cfg.channels.filter(c => s.kind==='content' || c.platform==='telegram')"><button class="chip" :class="s.channel_ids.includes(c.id) && 'on'" @click="toggle(s.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div></div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section x-show="tab==='settings'">
+    <div class="card"><h3>Brand</h3><div class="grid">
+      <div><label>Brand name</label><input x-model="cfg.general.brand_name" @input="touch()"></div>
+      <div><label>Handle (@telegram / social)</label><input x-model="cfg.general.brand_handle" @input="touch()"></div>
+      <div><label>Copyright owner (blank = brand)</label><input x-model="cfg.general.copyright_owner" @input="touch()"></div>
+      <div><label>&nbsp;</label><label class="toggle"><input type="checkbox" x-model="cfg.general.pdf_watermark" @change="touch()"> watermark PDFs</label></div>
+    </div></div>
+    <div class="card"><h3>Language, time &amp; voice</h3><div class="grid">
+      <div><label>Default language</label><select x-model="cfg.general.default_language" @change="touch()"><template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="cfg.general.default_language===k"></option></template></select></div>
+      <div><label>Timezone</label><input x-model="cfg.general.timezone" @input="touch()" placeholder="Asia/Kolkata"></div>
+      <div><label>Voice-over</label><select x-model="cfg.general.tts_provider" @change="touch()"><option value="auto">Auto (ElevenLabs → Edge)</option><option value="elevenlabs">ElevenLabs</option><option value="edge">Edge TTS (free)</option><option value="none">No voice</option></select></div>
+      <div><label>&nbsp;</label><label class="toggle"><input type="checkbox" x-model="cfg.general.mnemonic_review" @change="touch()"> review memory tricks (extra AI call)</label></div>
+    </div></div>
+    <div class="card"><h3>Daily newspaper</h3><div class="grid">
+      <div><label>Title (Hindi)</label><input x-model="cfg.general.akhbar_title_hi" @input="touch()"></div>
+      <div><label>Title (English)</label><input x-model="cfg.general.akhbar_title_en" @input="touch()"></div>
+      <div><label>Max articles</label><input type="number" min="4" max="16" x-model.number="cfg.general.akhbar_articles" @input="touch()"></div>
+    </div></div>
+    <div class="card"><h3>Keys &amp; bot</h3><div class="grid">
+      <div><label>Anthropic API key</label><input type="password" x-model="cfg.secrets.anthropic_api_key" @input="touch()" placeholder="not set"></div>
+      <div><label>Telegram bot token</label><input type="password" x-model="cfg.secrets.telegram_bot_token" @input="touch()" placeholder="not set"></div>
+      <div><label>ElevenLabs API key</label><input type="password" x-model="cfg.secrets.elevenlabs_api_key" @input="touch()" placeholder="not set"></div>
+      <div><label>Bot admin user IDs (comma separated)</label><input :value="cfg.general.telegram_admin_ids.join(', ')" @change="cfg.general.telegram_admin_ids = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div>
+    </div><p class="muted">Keys are stored on the server and shown masked; leave a field as is to keep the saved value. A new bot token takes effect after restarting the server.</p></div>
+  </section>
+</main></template>
+
+<script>
+function app() {
+  return {
+    tab: 'dash', cfg: null, catalogue: {}, examDefs: {}, status: {}, dirty: false, saving: false, error: '', flash: '', tests: {},
+    tabs: [{id:'dash',label:'Dashboard'},{id:'channels',label:'Channels'},{id:'exams',label:'Exams'},{id:'schedules',label:'Schedules'},{id:'settings',label:'Settings'}],
+    async init() {
+      await this.load();
+      await this.refresh();
+      setInterval(() => this.refresh(), 10000);
+      window.addEventListener('beforeunload', e => { if (this.dirty) { e.preventDefault(); e.returnValue = ''; } });
+    },
+    async api(method, url, body) {
+      const r = await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+      return data;
+    },
+    async load() {
+      const d = await this.api('GET', '/api/config');
+      this.cfg = d.config; this.catalogue = d.catalogue; this.examDefs = d.exam_defs; this.dirty = false;
+    },
+    async refresh() { try { this.status = await this.api('GET', '/api/status'); } catch (e) {} },
+    touch() { this.dirty = true; this.flash = ''; },
+    async save() {
+      this.saving = true; this.error = '';
+      try {
+        const d = await this.api('PUT', '/api/config', this.cfg);
+        this.cfg = d.config; this.catalogue = d.catalogue; this.examDefs = d.exam_defs; this.dirty = false;
+        this.flash = 'Saved. Schedules reloaded.'; await this.refresh();
+      } catch (e) { this.error = e.message; }
+      this.saving = false;
+    },
+    toggle(arr, v) { const i = arr.indexOf(v); i >= 0 ? arr.splice(i, 1) : arr.push(v); this.touch(); },
+    uid() { return Math.random().toString(16).slice(2, 10); },
+    addChannel(p) {
+      this.cfg.channels.push({id: this.uid(), name: p === 'telegram' ? 'Telegram channel' : (p === 'youtube' ? 'YouTube' : 'Instagram'), platform: p, enabled: true,
+        chat_id: '', send_video: true, client_id: '', client_secret: '', refresh_token: '', privacy: 'public', user_id: '', access_token: ''});
+      this.touch();
+    },
+    addSchedule(kind) {
+      this.cfg.schedules.push({id: this.uid(), name: kind === 'akhbar' ? 'Daily newspaper' : 'New schedule', enabled: true, kind,
+        mode: kind === 'akhbar' ? 'daily' : 'interval', every_hours: 6, start_at: '07:00', times: ['07:00'],
+        days: ['mon','tue','wed','thu','fri','sat','sun'], exam_ids: [], content_types: [], video_styles: [],
+        outputs: {card: true, questions: true, pdf: true, short: kind === 'content'}, channel_ids: [], language: null});
+      this.touch();
+    },
+    newExam() { this.cfg.custom_exams.push({id: '', name: '', short_name: '', language: this.cfg.general.default_language, audience: '', subjects: {}}); this.touch(); },
+    removeCustom(i) { const id = this.cfg.custom_exams[i].id; this.cfg.custom_exams.splice(i, 1); this.cfg.exams = this.cfg.exams.filter(e => e.exam_id !== id); this.touch(); },
+    subjectsText(ce) { return Object.entries(ce.subjects || {}).map(([s, t]) => s + ': ' + t.join('; ')).join('\n'); },
+    parseSubjects(text) {
+      const out = {};
+      text.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+        const [s, rest] = l.includes(':') ? [l.slice(0, l.indexOf(':')), l.slice(l.indexOf(':') + 1)] : [l, l];
+        out[s.trim()] = rest.split(';').map(x => x.trim()).filter(Boolean);
+      });
+      return out;
+    },
+    async testChannel(c) {
+      if (this.dirty) { this.tests[c.id] = 'Save your changes first.'; return; }
+      this.tests[c.id] = 'Testing…';
+      try { const r = await this.api('POST', `/api/channels/${c.id}/test`); this.tests[c.id] = (r.ok ? '✅ ' : '❌ ') + r.detail; }
+      catch (e) { this.tests[c.id] = '❌ ' + e.message; }
+    },
+    async runNow(s, dry) {
+      try { await this.api('POST', `/api/schedules/${s.id}/run?dry=${dry}`); this.flash = `Started “${s.name}”${dry ? ' (dry run, nothing will be posted)' : ''}. Progress shows on the dashboard.`; this.tab = 'dash'; this.refresh(); }
+      catch (e) { this.error = e.message; }
+    },
+    describe(s) {
+      const when = s.mode === 'interval' ? `every ${s.every_hours}h from ${s.start_at}` : `daily at ${s.times.join(', ')}`;
+      return s.enabled ? when : 'paused';
+    },
+    warnings() {
+      const w = [];
+      if (!this.cfg) return w;
+      if (!this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings – nothing can be generated without it.');
+      if (!this.cfg.secrets.telegram_bot_token) w.push('Add a Telegram bot token in Settings to post to Telegram.');
+      if (!this.cfg.channels.some(c => c.enabled)) w.push('No channels are enabled.');
+      if (!this.cfg.exams.some(e => e.enabled)) w.push('No exams are enabled.');
+      return w;
+    },
+    examName(id) { return this.examDefs[id]?.name || id; },
+    examShort(id) { return this.examDefs[id]?.short_name || id; },
+    langName(k) { return this.catalogue.languages?.[k] || k; },
+    icon(p) { return {telegram: '✈️', youtube: '▶️', instagram: '📸'}[p] || ''; },
+    fmt(t) { if (!t) return '—'; const d = new Date(t); return isNaN(d) ? t : d.toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'}); },
+  };
+}
+</script>
+<style>[x-cloak]{display:none}</style>
+</body>
+</html>

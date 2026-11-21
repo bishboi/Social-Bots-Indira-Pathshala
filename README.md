@@ -1,6 +1,6 @@
 # Indira Pathshala – Social Bots
 
-An automated exam-prep content pipeline plus a Telegram bot. Each run:
+An automated exam-prep content pipeline, a Telegram bot, an **admin panel** for configuring everything, and a **daily current-affairs newspaper**. Each content run:
 
 1. **Picks a target exam**: Rajasthan SI, JEE Main, NEET, CBSE 10, RBSE 12, REET, SSC CGL… (weighted random, or the one you choose). It then picks a subject, a seed topic and a format: previous-year-style quiz, concept explainer, cheatsheet, formula sheet, memory trick or current affairs.
 2. **Researches it on the internet.** Claude, using its web search tool, checks the current syllabus and previous-year question trends, picks one high-yield sub-topic it hasn't covered recently, and gathers facts from the sources it cites.
@@ -29,6 +29,44 @@ pathshala_bot/
   publish/          telegram.py, youtube.py, instagram.py
   bot.py            Telegram bot: commands + daily schedule
 ```
+
+## Admin panel
+
+Start everything with one command: the web panel, the scheduler and the Telegram bot.
+
+```bash
+ADMIN_PASSWORD=choose-a-password python -m pathshala_bot serve
+```
+
+Then open http://localhost:8080 and log in as `admin`. The panel has five tabs:
+
+| Tab | What you configure |
+|---|---|
+| **Dashboard** | Upcoming runs, what's running now, recent runs with links to their PDFs and videos, and setup warnings (e.g. a missing API key) |
+| **Channels** | Any number of Telegram channels, YouTube accounts and Instagram accounts. Each has its own credentials, an on/off switch and a **Test** button. |
+| **Exams** | Turn each target exam on or off. Set its **language** (Hindi, English or Hinglish), how often it's picked, and which channels it posts to. You can also add custom exams with their own subjects and topics. |
+| **Schedules** | **Every X hours** (from a start time) or **at set times** each day, on chosen days of the week. Also: which exams, which content types, which **outputs** (shorts/reels, PDF notes, quiz questions, post + card + memory trick), which video styles, which channels, and a language override. Each schedule has **Run now** and **Dry run** (generate without posting) buttons. |
+| **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, and API keys. Keys are stored on the server and only ever shown masked. |
+
+Settings are saved to `output/control.json` (readable only by the server's own user). On the first start that file is seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. The panel uses HTTP Basic auth (`ADMIN_USER` / `ADMIN_PASSWORD`), so put it behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
+
+## Daily current-affairs newspaper (Akhbar)
+
+The newspaper is a "Daily newspaper" schedule (it's in the panel, off by default). For each chosen exam it:
+
+1. **Researches the day's news.** Claude searches the web for the last 24–48 hours and **decides what matters for that exam**. For a state PSC or police exam, state schemes, appointments and culture come first, then national and international news. For JEE/NEET it's science, health and NTA notices. It prefers official and reputable sources (PIB, government portals, major newspapers) and skips headlines it has used in the last week.
+2. **Writes the edition:** 8–12 articles, each with a headline, dateline, summary, body, key facts, an **exam angle** ("परीक्षा दृष्टि"), a related static GK fact and its sources. It adds one-liners, "did you know" facts and a 6–10 question quiz.
+3. **Checks it:** stories with no date, more than 3 days old, or with no source are dropped. The rest are ordered by exam importance.
+4. **Renders a newspaper-style A4 PDF:** a masthead with logo, date and issue number; a full-width lead story; two-column articles; boxed one-liners and "did you know"; the quiz with an answer key; plus the watermark and © footer.
+5. **Posts it to Telegram:** the PDF with today's top headlines as the caption, and optionally the quiz as polls.
+
+You can also run it by hand. To post to the exam's Telegram channels:
+
+```bash
+python -m pathshala_bot akhbar --exam rajasthan-si --publish
+```
+
+To post somewhere specific instead, use `--chat @yourchannel`. Admins can also send `/akhbar rajasthan-si` to the bot to get a preview in their own chat.
 
 ## Video styles
 
@@ -125,11 +163,13 @@ Re-post an earlier run:
 python -m pathshala_bot run --from-json output/<run>/content.json --publish telegram
 ```
 
-Start the long-running bot (it also auto-posts daily at `POST_TIMES`):
+Start the admin panel, scheduler and bot together (recommended):
 
 ```bash
-python -m pathshala_bot bot
+python -m pathshala_bot serve
 ```
+
+To run the bot alone with the older `.env` schedule (`POST_TIMES`), use `python -m pathshala_bot bot`.
 
 List the configured exams:
 
@@ -146,13 +186,14 @@ python -m pathshala_bot exams
 | `/preview [exam] [type] [style]` | admin | Generates and sends everything to *your* chat only |
 | `/generate [exam] [type] [style]` | admin | Generates and publishes to the channel, YouTube and Instagram |
 | `/history` | admin | Lists the last runs |
+| `/akhbar [exam]` | admin | Builds today's current-affairs newspaper and sends it to your chat |
 
 Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`.
 
 ### Hosting options
 
-- **Docker / VPS:** run `docker build -t pathshala .`, then `docker run --env-file .env -v $PWD/data:/data pathshala`. This runs the bot and its daily schedule.
-- **GitHub Actions:** `.github/workflows/post.yml` posts at 08:00 and 18:00 IST with no server. Add the `.env` values as repository secrets. You can also run it manually from the Actions tab and pick the exam, format and platforms.
+- **Docker / VPS:** run `docker build -t pathshala .`, then `docker run --env-file .env -p 8080:8080 -v $PWD/data:/data pathshala`. This runs the admin panel, scheduler and bot; settings and history persist in `./data`.
+- **GitHub Actions:** `.github/workflows/post.yml` posts at 08:00 and 18:00 IST with no server, and the newspaper at 06:45 IST for the exams in the `AKHBAR_EXAMS` repository variable. This option has no admin panel: it uses the `.env` values. Add the `.env` values as repository secrets. You can also run it manually from the Actions tab and pick the exam, format and platforms.
 
 ## Credentials
 

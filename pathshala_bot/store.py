@@ -21,6 +21,13 @@ CREATE TABLE IF NOT EXISTS runs (
     publish TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_exam ON runs(exam_id, created_at);
+CREATE TABLE IF NOT EXISTS headlines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    headline TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS headlines_exam ON headlines(exam_id, day);
 """
 
 
@@ -48,6 +55,28 @@ class History:
                 "INSERT INTO runs(created_at, exam_id, subject, topic, content_type, run_dir, status, publish) VALUES (?,?,?,?,?,?,?,?)",
                 (datetime.now(timezone.utc).isoformat(), exam_id, subject, topic, content_type, run_dir, status, json.dumps(publish, ensure_ascii=False)),
             )
+
+    def recent_headlines(self, exam_id: str, days: int = 7) -> list[str]:
+        with closing(self._conn()) as c:
+            rows = c.execute(
+                "SELECT headline FROM headlines WHERE exam_id=? AND day >= date('now', ?) ORDER BY id DESC",
+                (exam_id, f"-{days} day"),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def add_headlines(self, exam_id: str, day: str, headlines: list[str]) -> None:
+        with closing(self._conn()) as c, c:
+            c.executemany("INSERT INTO headlines(exam_id, day, headline) VALUES (?,?,?)", [(exam_id, day, h) for h in headlines])
+
+    def akhbar_count(self, exam_id: str) -> int:
+        with closing(self._conn()) as c:
+            return c.execute("SELECT COUNT(*) FROM runs WHERE exam_id=? AND content_type='akhbar' AND status!='failed'", (exam_id,)).fetchone()[0]
+
+    def runs(self, limit: int = 50) -> list[dict]:
+        with closing(self._conn()) as c:
+            c.row_factory = sqlite3.Row
+            rows = c.execute("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     def last_runs(self, limit: int = 10) -> list[tuple]:
         with closing(self._conn()) as c:

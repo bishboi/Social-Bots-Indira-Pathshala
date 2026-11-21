@@ -17,6 +17,12 @@ from .store import History
 
 log = logging.getLogger(__name__)
 
+
+def _last_line(text: str) -> str:
+    """The informative line of a traceback (the exception message), not 'Traceback ...'."""
+    lines = [l for l in text.strip().splitlines() if l.strip()]
+    return (lines[-1] if lines else text)[:300]
+
 PLATFORMS = ("telegram", "youtube", "instagram")
 
 # How often each format is picked on a random run.
@@ -59,7 +65,7 @@ class RunResult:
         for k, v in self.published.items():
             url = v.get("url") if isinstance(v, dict) else None
             lines.append(f"Published {k}: {url or 'ok'}")
-        lines += [f"ERROR {k}: {v.splitlines()[0][:300]}" for k, v in self.errors.items()]
+        lines += [f"ERROR {k}: {_last_line(v)}" for k, v in self.errors.items()]
         return "\n".join(lines)
 
 
@@ -114,7 +120,8 @@ def _map_figure(pkg: ContentPackage, exam: Exam, run_dir: Path) -> Path | None:
         return None
 
 
-def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult, make_video: bool = True, style: str | None = None) -> None:
+def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult, make_video: bool = True, style: str | None = None,
+               make_pdf: bool = True) -> None:
     from .render import images, pdf, video
 
     map_png = _map_figure(pkg, exam, run_dir)
@@ -124,6 +131,8 @@ def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult
         ("card", lambda: images.render_card(pkg, exam, run_dir / "card.png")),
         ("pdf", lambda: pdf.render_pdf(pkg, exam, run_dir / "notes.pdf", map_png=map_png)),
     ]
+    if not make_pdf:
+        steps = steps[:1]
     for name, fn in steps:
         try:
             result.assets[name] = fn()
@@ -139,6 +148,28 @@ def render_all(pkg: ContentPackage, exam: Exam, run_dir: Path, result: RunResult
         except Exception:
             log.exception("video render failed")
             result.errors["video"] = traceback.format_exc()
+
+
+def publish_to_channels(pkg: ContentPackage, exam: Exam, result: RunResult, channels: list, outputs: set[str]) -> None:
+    """Publish to channels configured in the admin UI (control.Channel objects)."""
+    from .publish import instagram, telegram, youtube
+
+    for ch in channels:
+        key = f"{ch.platform}:{ch.name}"
+        try:
+            if ch.platform == "telegram":
+                result.published[key] = telegram.publish(pkg, exam, result.assets, chat_id=ch.chat_id, include=outputs, send_video=ch.send_video)
+            elif "short" not in outputs or "video" not in result.assets:
+                result.errors[key] = "skipped: shorts are off for this run" if "short" not in outputs else "skipped: no video"
+            elif ch.platform == "youtube":
+                creds = {"client_id": ch.client_id, "client_secret": ch.client_secret, "refresh_token": ch.refresh_token, "privacy": ch.privacy}
+                result.published[key] = youtube.publish(pkg, exam, result.assets["video"], credits=result.credits, creds=creds)
+            elif ch.platform == "instagram":
+                creds = {"user_id": ch.user_id, "access_token": ch.access_token}
+                result.published[key] = instagram.publish(pkg, exam, result.assets["video"], result.assets.get("card"), credits=result.credits, creds=creds)
+        except Exception:
+            log.exception("publish to %s failed", key)
+            result.errors[key] = traceback.format_exc()
 
 
 def publish_all(pkg: ContentPackage, exam: Exam, result: RunResult, platforms: set[str], chat_id: str | None = None) -> None:
@@ -188,12 +219,22 @@ def run(
     make_video: bool = True,
     seed: int | None = None,
     video_style: str | None = None,
+    exams: dict[str, Exam] | None = None,
+    outputs: set[str] | None = None,
+    channels: list | None = None,
 ) -> RunResult:
-    """Run the full pipeline once. `platforms=None/empty` is a dry run (render only)."""
+    """Run the full pipeline once.
+
+    platforms/chat_id: legacy .env-based publishing; channels: admin-UI channels (takes precedence).
+    outputs: subset of {"card", "questions", "pdf", "short"}; exams: pool to pick from (UI overrides applied).
+    Nothing is published when neither platforms nor channels are given (dry run).
+    """
     from . import llm
 
     rng = random.Random(seed)
-    exams = load_exams()
+    exams = exams or load_exams()
+    outputs = set(outputs or ("card", "questions", "pdf", "short"))
+    make_video = make_video and "short" in outputs
     history = History(settings.db_path)
     platforms = set(platforms or ())
 
@@ -240,8 +281,10 @@ def run(
 
     result.package = pkg
     (run_dir / "content.json").write_text(pkg.model_dump_json(indent=2), encoding="utf-8")
-    render_all(pkg, exam, run_dir, result, make_video=make_video, style=video_style)
-    if platforms:
+    render_all(pkg, exam, run_dir, result, make_video=make_video, style=video_style, make_pdf="pdf" in outputs)
+    if channels:
+        publish_to_channels(pkg, exam, result, channels, outputs)
+    elif platforms:
         publish_all(pkg, exam, result, platforms, chat_id=chat_id)
     _finish(result, history, subject, pkg.topic, content_type)
     return result

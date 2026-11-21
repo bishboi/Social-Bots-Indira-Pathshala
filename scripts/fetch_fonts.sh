@@ -17,3 +17,6 @@ fetch "Noto+Sans+Devanagari" NotoSansDevanagari 400 Regular
 fetch "Noto+Sans+Devanagari" NotoSansDevanagari 700 Bold
 fetch "Poppins" Poppins 400 Regular
 fetch "Poppins" Poppins 700 Bold
+# Serif face for the daily current-affairs newspaper (Akhbar)
+fetch "Noto+Serif+Devanagari" NotoSerifDevanagari 400 Regular
+fetch "Noto+Serif+Devanagari" NotoSerifDevanagari 700 Bold

@@ -6,6 +6,7 @@ on:
   schedule:
     - cron: "30 2 * * *"    # 08:00 IST
     - cron: "30 12 * * *"   # 18:00 IST
+    - cron: "15 1 * * *"    # 06:45 IST - daily current-affairs newspaper
   workflow_dispatch:
     inputs:
       exam:
@@ -42,7 +43,19 @@ jobs:
           path: output/history.sqlite3
           key: history-${{ github.run_id }}
           restore-keys: history-
+      - name: Daily newspaper (Akhbar)
+        if: github.event.schedule == '15 1 * * *'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          BRAND_NAME: ${{ vars.BRAND_NAME || 'Indira Pathshala' }}
+          BRAND_HANDLE: ${{ vars.BRAND_HANDLE || '@indirapathshala' }}
+          AKHBAR_EXAMS: ${{ vars.AKHBAR_EXAMS || 'rajasthan-si' }}
+        run: |
+          for e in ${AKHBAR_EXAMS//,/ }; do python -m pathshala_bot akhbar --exam "$e" --publish || true; done
       - name: Run pipeline
+        if: github.event.schedule != '15 1 * * *'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

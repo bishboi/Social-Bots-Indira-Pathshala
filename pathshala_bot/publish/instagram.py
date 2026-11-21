@@ -37,11 +37,12 @@ def caption_for(pkg: ContentPackage) -> str:
     return text[:2200]
 
 
-def publish(pkg: ContentPackage, exam: Exam, video: Path, cover: Path | None = None, credits: list[str] | None = None) -> dict:
-    if not settings.instagram_enabled:
+def publish(pkg: ContentPackage, exam: Exam, video: Path, cover: Path | None = None, credits: list[str] | None = None,
+            creds: dict | None = None) -> dict:
+    creds = creds or {"user_id": settings.instagram_user_id, "access_token": settings.instagram_access_token}
+    token, user = creds.get("access_token"), creds.get("user_id")
+    if not (token and user):
         raise RuntimeError("Instagram credentials are not configured")
-    token = settings.instagram_access_token
-    user = settings.instagram_user_id
     caption = caption_for(pkg)
     if credits:
         caption = (caption + "\n\nImages: " + "; ".join(credits))[:2200]

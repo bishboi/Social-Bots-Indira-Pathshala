@@ -23,13 +23,19 @@ UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 EDUCATION_CATEGORY = "27"
 
 
-def access_token() -> str:
+def default_creds() -> dict:
+    return {"client_id": settings.youtube_client_id, "client_secret": settings.youtube_client_secret,
+            "refresh_token": settings.youtube_refresh_token, "privacy": privacy}
+
+
+def access_token(creds: dict | None = None) -> str:
+    c = creds or default_creds()
     r = httpx.post(
         TOKEN_URL,
         data={
-            "client_id": settings.youtube_client_id,
-            "client_secret": settings.youtube_client_secret,
-            "refresh_token": settings.youtube_refresh_token,
+            "client_id": c["client_id"],
+            "client_secret": c["client_secret"],
+            "refresh_token": c["refresh_token"],
             "grant_type": "refresh_token",
         },
         timeout=30,
@@ -38,10 +44,12 @@ def access_token() -> str:
     return r.json()["access_token"]
 
 
-def publish(pkg: ContentPackage, exam: Exam, video: Path, credits: list[str] | None = None) -> dict:
-    if not settings.youtube_enabled:
+def publish(pkg: ContentPackage, exam: Exam, video: Path, credits: list[str] | None = None, creds: dict | None = None) -> dict:
+    creds = creds or default_creds()
+    if not (creds.get("client_id") and creds.get("client_secret") and creds.get("refresh_token")):
         raise RuntimeError("YouTube credentials are not configured")
-    token = access_token()
+    privacy = creds.get("privacy") or settings.youtube_privacy
+    token = access_token(creds)
     title = pkg.short.title if "#shorts" in pkg.short.title.lower() else f"{pkg.short.title} #Shorts"
     hashtags = " ".join(f"#{h}" for h in pkg.short.hashtags)
     description = (
@@ -64,7 +72,7 @@ def publish(pkg: ContentPackage, exam: Exam, video: Path, credits: list[str] | N
             "defaultLanguage": "hi" if exam.language == "hi" else "en",
             "defaultAudioLanguage": "hi" if exam.language in ("hi", "hinglish") else "en",
         },
-        "status": {"privacyStatus": settings.youtube_privacy, "selfDeclaredMadeForKids": False},
+        "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False},
     }
     size = video.stat().st_size
     with httpx.Client(timeout=httpx.Timeout(60, write=600, read=600)) as http:

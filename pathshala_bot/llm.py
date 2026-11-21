@@ -103,48 +103,8 @@ PREVIOUS-YEAR QUESTIONS: list (or "none found")
 COMMON MISTAKES: bullet list
 SOURCES: list of "title - url" you actually relied on"""
 
-    messages: list[dict] = [{"role": "user", "content": prompt}]
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": settings.max_web_searches}]
-    sources: dict[str, str] = {}
-    text_parts: list[str] = []
-
-    for _ in range(6):  # pause_turn continuations
-        with client().beta.messages.stream(
-            model=settings.claude_model,
-            max_tokens=32000,
-            betas=[FALLBACK_BETA],
-            fallbacks="default",
-            output_config={"effort": settings.research_effort},
-            tools=tools,
-            messages=messages,
-        ) as stream:
-            resp = stream.get_final_message()
-        _check_refusal(resp)
-
-        for block in resp.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-                for c in getattr(block, "citations", None) or []:
-                    url = getattr(c, "url", None)
-                    if url:
-                        sources.setdefault(url, getattr(c, "title", "") or url)
-            elif block.type == "web_search_tool_result":
-                results = block.content
-                if isinstance(results, list):  # an error result is a single object
-                    for r in results:
-                        if getattr(r, "url", None):
-                            sources.setdefault(r.url, getattr(r, "title", "") or r.url)
-
-        if resp.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": resp.content})
-            continue
-        break
-
-    notes = "".join(text_parts).strip()
-    if not notes:
-        raise RuntimeError("Research step returned no text")
-    log.info("research done: %d chars, %d sources", len(notes), len(sources))
-    return Research(notes=notes, sources=[{"title": t, "url": u} for u, t in sources.items()])
+    return web_research(prompt, tools)
 
 
 def generate_package(exam: Exam, subject: str, content_type: str, research: Research, video_style: str = "concept_explainer") -> ContentPackage:
@@ -273,3 +233,69 @@ Does each cue clearly point to its fact, in order, with nothing missing or extra
         log.warning("reviewed trick still fails checks %s - dropping it", mnemonic_issues(final))
         return None
     return final
+
+def web_research(prompt: str, tools: list[dict]) -> Research:
+    """Run a web-search research turn (handling pause_turn) and collect text + cited sources."""
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    sources: dict[str, str] = {}
+    text_parts: list[str] = []
+
+    for _ in range(6):  # pause_turn continuations
+        with client().beta.messages.stream(
+            model=settings.claude_model,
+            max_tokens=32000,
+            betas=[FALLBACK_BETA],
+            fallbacks="default",
+            output_config={"effort": settings.research_effort},
+            tools=tools,
+            messages=messages,
+        ) as stream:
+            resp = stream.get_final_message()
+        _check_refusal(resp)
+
+        for block in resp.content:
+            if block.type == "text":
+                text_parts.append(block.text)
+                for c in getattr(block, "citations", None) or []:
+                    url = getattr(c, "url", None)
+                    if url:
+                        sources.setdefault(url, getattr(c, "title", "") or url)
+            elif block.type == "web_search_tool_result":
+                results = block.content
+                if isinstance(results, list):  # an error result is a single object
+                    for r in results:
+                        if getattr(r, "url", None):
+                            sources.setdefault(r.url, getattr(r, "title", "") or r.url)
+
+        if resp.stop_reason == "pause_turn":
+            messages.append({"role": "assistant", "content": resp.content})
+            continue
+        break
+
+    notes = "".join(text_parts).strip()
+    if not notes:
+        raise RuntimeError("Research step returned no text")
+    log.info("research done: %d chars, %d sources", len(notes), len(sources))
+    return Research(notes=notes, sources=[{"title": t, "url": u} for u, t in sources.items()])
+
+
+def structured(system: str, user: str, model, max_tokens: int = 32000, effort: str | None = None):
+    """One structured-output call returning a validated pydantic object (streams for long outputs)."""
+    with client().beta.messages.stream(
+        model=settings.claude_model,
+        max_tokens=max_tokens,
+        betas=[FALLBACK_BETA],
+        fallbacks="default",
+        output_config={"effort": effort or settings.generation_effort},
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_format=model,
+    ) as stream:
+        resp = stream.get_final_message()
+    _check_refusal(resp)
+    if resp.stop_reason == "max_tokens":
+        raise RuntimeError("output truncated (max_tokens)")
+    out = resp.parsed_output
+    if out is None:
+        raise RuntimeError("no structured output returned")
+    return out

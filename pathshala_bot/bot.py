@@ -9,6 +9,7 @@ Commands
   /generate [exam] [type] [style]  admin: generate and publish to the channel + YouTube + Instagram
   /quiz [exam]             anyone: replay a random quiz question from past content (no AI call)
   /history                 admin: last runs
+  /akhbar [exam]           admin: build today's current-affairs paper and send it here
 """
 
 from __future__ import annotations
@@ -74,7 +75,18 @@ async def _run_and_report(chat_id: int | str, bot, exam: str | None, ctype: str 
     async with _run_lock:
         await bot.send_message(chat_id, f"🔎 Researching {exam or 'a random exam'} ({ctype or 'random format'})… this takes a few minutes.")
         try:
-            result = await asyncio.to_thread(pipeline.run, exam_id=exam, content_type=ctype, platforms=platforms, chat_id=target_chat, video_style=style)
+            if target_chat is None:  # publish: use the channels / exams configured in the admin panel
+                from . import control
+
+                cfg = control.load()
+                pool = control.effective_exams(cfg)
+                if exam and exam not in pool:
+                    raise KeyError(f"Exam '{exam}' is not enabled in the admin panel")
+                exam = exam or random.choices(list(pool), weights=[max(0.01, e.weight) for e in pool.values()])[0]
+                chans = control.channels_for(cfg, exam)
+                result = await asyncio.to_thread(pipeline.run, exam_id=exam, content_type=ctype, video_style=style, exams=pool, channels=chans)
+            else:
+                result = await asyncio.to_thread(pipeline.run, exam_id=exam, content_type=ctype, platforms=platforms, chat_id=target_chat, video_style=style)
         except Exception as e:  # bad args etc.
             await bot.send_message(chat_id, f"❌ {e}")
             return
@@ -139,9 +151,36 @@ async def scheduled_post(ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await _run_and_report(report_to, ctx.bot, None, None, set(pipeline.PLATFORMS), None)
 
 
-def main() -> None:
-    if not settings.telegram_bot_token:
-        raise SystemExit("Set TELEGRAM_BOT_TOKEN in .env")
+async def akhbar_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin: build today's current-affairs paper for an exam and send it to this chat."""
+    if not _is_admin(update):
+        await update.message.reply_text("Admins only.")
+        return
+    from . import akhbar, control
+
+    exam_id, _, _ = _parse_args(ctx.args)
+    cfg = control.load()
+    pool = control.effective_exams(cfg) or load_exams()
+    exam = pool.get(exam_id) if exam_id else next(iter(pool.values()))
+    if exam is None:
+        await update.message.reply_text("Unknown or disabled exam.")
+        return
+    chat = str(update.effective_chat.id)
+    preview_channel = control.Channel(name="preview", platform="telegram", chat_id=chat)
+    if _run_lock.locked():
+        await update.message.reply_text("⏳ A run is already in progress, please wait.")
+        return
+
+    async def job():
+        async with _run_lock:
+            await ctx.bot.send_message(chat, f"🗞 Searching today's news for {exam.short_name}… this takes a few minutes.")
+            res = await asyncio.to_thread(akhbar.run, exam, [preview_channel], False)
+            await ctx.bot.send_message(chat, ("✅ " if res.ok else "⚠️ ") + res.summary()[:4000])
+
+    ctx.application.create_task(job())
+
+
+def build_application(with_schedule: bool = False) -> Application:
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.add_handler(CommandHandler(["start", "help"], start))
     app.add_handler(CommandHandler("exams", exams_cmd))
@@ -151,12 +190,21 @@ def main() -> None:
     app.add_handler(CommandHandler("generate", generate))
     app.add_handler(CommandHandler("quiz", quiz))
     app.add_handler(CommandHandler("history", history_cmd))
+    app.add_handler(CommandHandler("akhbar", akhbar_cmd))
 
-    tz = ZoneInfo(settings.post_timezone)
-    for t in settings.post_times:
-        hh, mm = (int(x) for x in t.split(":"))
-        app.job_queue.run_daily(scheduled_post, time=dt.time(hh, mm, tzinfo=tz), name=f"post-{t}")
-        log.info("scheduled daily post at %s %s", t, settings.post_timezone)
+    if with_schedule:  # legacy: POST_TIMES from .env (the admin panel scheduler replaces this)
+        tz = ZoneInfo(settings.post_timezone)
+        for t in settings.post_times:
+            hh, mm = (int(x) for x in t.split(":"))
+            app.job_queue.run_daily(scheduled_post, time=dt.time(hh, mm, tzinfo=tz), name=f"post-{t}")
+            log.info("scheduled daily post at %s %s", t, settings.post_timezone)
+    return app
 
+
+def main() -> None:
+    """Bot only, with the legacy .env schedule. Prefer `python -m pathshala_bot serve`."""
+    if not settings.telegram_bot_token:
+        raise SystemExit("Set TELEGRAM_BOT_TOKEN in .env")
+    app = build_application(with_schedule=True)
     log.info("bot polling…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
