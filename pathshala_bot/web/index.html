@@ -189,8 +189,16 @@
             <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="sp.language===k"></option></template></select></div>
           <div><label>Remember last N topics (not repeated)</label><input type="number" min="0" max="500" x-model.number="sp.memory" @input="touch()"></div>
         </div>
-        <div style="margin-top:10px"><label>Exams in this space <span class="muted">(one or more; the agent picks topics across them)</span></label><div class="chips">
-          <template x-for="(e, id) in examDefs"><button class="chip" :class="sp.exam_ids.includes(id) && 'on'" @click="toggle(sp.exam_ids, id)" :title="e.name" x-text="e.short_name"></button></template></div></div>
+        <div style="margin-top:10px"><label>Exams in this space <span class="muted">(type one or more names; the agent picks topics across them)</span></label>
+          <div class="chips" x-show="sp.exam_ids.length" style="margin-bottom:6px">
+            <template x-for="id in sp.exam_ids" :key="id"><span class="chip on" :title="examInfo(id)">
+              <span x-text="examShort(id)"></span> <a href="#" style="color:inherit; text-decoration:none; margin-left:4px" title="Remove from this space" @click.prevent="sp.exam_ids.splice(sp.exam_ids.indexOf(id), 1); touch()">✕</a></span></template></div>
+          <div class="row" style="flex-wrap:nowrap">
+            <input list="exam-names" :placeholder="'Type an exam name, e.g. Rajasthan Patwari, UP Police Constable, CTET'" x-model="examInput[spKey(sp)]"
+                   @keydown.enter.prevent="addExam(sp)" :disabled="looking[spKey(sp)]">
+            <button class="btn" @click="addExam(sp)" :disabled="looking[spKey(sp)] || !(examInput[spKey(sp)]||'').trim()" x-text="looking[spKey(sp)] ? 'Searching…' : 'Add'"></button>
+          </div>
+          <div class="muted" x-show="lookMsg[spKey(sp)]" x-text="lookMsg[spKey(sp)]" style="margin-top:4px"></div></div>
         <div style="margin-top:10px"><label>Connected channels <span class="muted">(posts go only to these)</span></label><div class="chips">
           <template x-for="c in cfg.channels"><button class="chip" :class="sp.channel_ids.includes(c.id) && 'on'" @click="toggle(sp.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div>
           <div class="muted" x-show="!cfg.channels.length">Add channels in the Channels tab first.</div></div>
@@ -226,10 +234,17 @@
 
   <!-- ============ EXAMS ============ -->
   <section x-show="tab==='exams'">
-    <div class="section-title"><h2>Exams</h2><button class="btn" @click="newExam()">+ Custom exam</button></div>
+    <div class="section-title"><h2>Exams</h2><button class="btn" @click="newExam()">+ Enter one by hand</button></div>
+    <div class="card"><h3>Add an exam by name</h3>
+      <div class="row" style="flex-wrap:nowrap">
+        <input list="exam-names" placeholder="e.g. Rajasthan Patwari, Bihar Daroga, MPPSC Prelims, CTET Paper 2" x-model="examInput['_tab']" @keydown.enter.prevent="addExam(null)" :disabled="looking['_tab']">
+        <button class="btn" @click="addExam(null)" :disabled="looking['_tab'] || !(examInput['_tab']||'').trim()" x-text="looking['_tab'] ? 'Searching…' : 'Find'"></button>
+      </div>
+      <div class="muted" x-show="lookMsg['_tab']" x-text="lookMsg['_tab']" style="margin-top:4px"></div>
+      <p class="muted">The AI searches the web for the official notification and syllabus and fills in the exam's conducting body, pattern, language and subjects with topics. You can edit the result below. Takes about a minute.</p></div>
     <div class="card"><div class="table-wrap"><table>
       <tr><th>Exam</th><th>Language</th><th>Used in spaces</th></tr>
-      <template x-for="(e, id) in examDefs" :key="id">
+      <template x-for="(e, id) in allExams()" :key="id">
         <tr>
           <td><b x-text="e.name"></b> <span class="muted" x-text="'(' + id + ')'"></span><div class="muted" x-text="e.subjects.join(' · ')"></div></td>
           <td x-text="langName(e.language)"></td>
@@ -237,21 +252,29 @@
         </tr>
       </template>
     </table></div>
-    <p class="muted">The catalogue the spaces pick from. Built-in exams and their syllabus seeds live in exams.yaml; add your own below. A space's language setting overrides the exam's language.</p></div>
+    <p class="muted">The catalogue the spaces pick from. Built-in exams and their syllabus seeds live in exams.yaml; exams you add by name appear below. A space's language setting overrides the exam's language.</p></div>
 
     <template x-for="(ce, i) in cfg.custom_exams" :key="i">
       <div class="card">
-        <div class="row" style="justify-content:space-between"><h3>Custom exam</h3><button class="btn danger" @click="removeCustom(i)">Remove</button></div>
+        <div class="row" style="justify-content:space-between"><h3 x-text="ce.short_name || 'Custom exam'"></h3>
+          <div class="row">
+            <button class="btn" x-show="ce.typed_name || ce.name" @click="refreshExam(ce)" :disabled="looking['r_' + i]" x-text="looking['r_' + i] ? 'Searching…' : 'Refresh from web'"></button>
+            <button class="btn danger" @click="removeCustom(i)">Remove</button></div></div>
+        <div class="muted" x-show="ce.researched_on" style="margin-bottom:8px">
+          <span x-text="'Researched on ' + ce.researched_on + (ce.conducting_body ? ' · ' + ce.conducting_body : '')"></span>
+          <template x-for="u in (ce.sources||[]).slice(0,4)"><a :href="u" target="_blank" rel="noopener" style="margin-left:8px" x-text="hostOf(u)"></a></template></div>
         <div class="grid">
           <div><label>ID (lowercase, e.g. rajasthan-patwari)</label><input x-model="ce.id" @input="touch()"></div>
           <div><label>Full name</label><input x-model="ce.name" @input="touch()"></div>
           <div><label>Short name</label><input x-model="ce.short_name" @input="touch()"></div>
           <div><label>Language</label><select x-model="ce.language" @change="touch()"><template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="ce.language===k"></option></template></select></div>
           <div style="grid-column: 1/-1"><label>Audience</label><input x-model="ce.audience" @input="touch()"></div>
+          <div style="grid-column: 1/-1"><label>Conducting body</label><input x-model="ce.conducting_body" @input="touch()"></div>
+          <div style="grid-column: 1/-1"><label>Exam pattern (the agent reads this)</label><textarea rows="2" x-model="ce.pattern" @input="touch()"></textarea></div>
           <div style="grid-column: 1/-1"><label>Subjects — one per line: <code>Subject: topic one; topic two</code></label>
             <textarea :value="subjectsText(ce)" @change="ce.subjects = parseSubjects($event.target.value); touch()"></textarea></div>
         </div>
-        <p class="muted">Save to add it to the catalogue, then add it to a space.</p>
+        <p class="muted">Save to keep it. Add it to a space by typing its name there.</p>
       </div>
     </template>
   </section>
@@ -348,6 +371,7 @@
       <div><label>Bot admin user IDs (comma separated)</label><input :value="cfg.general.telegram_admin_ids.join(', ')" @change="cfg.general.telegram_admin_ids = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div>
     </div><p class="muted">Keys are stored on the server and shown masked; leave a field as is to keep the saved value. A new bot token takes effect after restarting the server.</p></div>
   </section>
+<datalist id="exam-names"><template x-for="(e, id) in allExams()" :key="id"><option :value="e.short_name"></option></template></datalist>
 </main></template>
 
 <script>
@@ -356,6 +380,7 @@ function app() {
     tab: 'dash', cfg: null, loadError: '', stopped: false, catalogue: {}, examDefs: {}, status: {}, dirty: false, saving: false, error: '', flash: '', tests: {},
     tabs: [{id:'dash',label:'Dashboard'},{id:'spaces',label:'Spaces'},{id:'channels',label:'Channels'},{id:'exams',label:'Exams'},{id:'news',label:'Newspaper'},{id:'settings',label:'Settings'}],
     days: ['mon','tue','wed','thu','fri','sat','sun'],
+    examInput: {}, looking: {}, lookMsg: {},
     async init() {
       for (;;) {  // keep retrying until the settings load (e.g. database fixed while the page is open)
         if (this.stopped) return;
@@ -453,6 +478,50 @@ function app() {
       try { const r = await this.api('POST', `/api/channels/${c.id}/test`); this.tests[c.id] = (r.ok ? '✅ ' : '❌ ') + r.detail; }
       catch (e) { this.tests[c.id] = '❌ ' + e.message; }
     },
+    spKey(sp) { return sp._key || sp.id; },
+    allExams() {
+      const out = {...this.examDefs};
+      (this.cfg?.custom_exams || []).forEach(c => { if (c.id) out[c.id] = {name: c.name, short_name: c.short_name || c.name, language: c.language,
+        subjects: Object.keys(c.subjects || {}), conducting_body: c.conducting_body, pattern: c.pattern, custom: true}; });
+      return out;
+    },
+    examInfo(id) {
+      const e = this.allExams()[id]; if (!e) return id;
+      return [e.name, e.conducting_body, e.pattern, (e.subjects || []).join(' · ')].filter(Boolean).join('\n');
+    },
+    hostOf(u) { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return 'source'; } },
+    async lookup(name, refreshId) {
+      return this.api('POST', '/api/exams/lookup', {name, refresh_id: refreshId || null, custom_exams: this.cfg.custom_exams});
+    },
+    async addExam(sp) {
+      const key = sp ? this.spKey(sp) : '_tab', name = (this.examInput[key] || '').trim();
+      if (!name) return;
+      this.looking[key] = true; this.lookMsg[key] = `Looking up “${name}”… if it's new, the AI searches the web for its syllabus (about a minute).`;
+      try {
+        const r = await this.lookup(name);
+        let id, msg;
+        if (r.match) { id = r.match; msg = `Found in the catalogue: ${r.name}.`; }
+        else {
+          const ex = r.exam; id = ex.id;
+          this.cfg.custom_exams.push(ex);
+          msg = `Added ${ex.name}${ex.conducting_body ? ' (' + ex.conducting_body + ')' : ''}: ${Object.keys(ex.subjects).length} subjects, language ${this.langName(ex.language)}. Check it in the Exams tab. Save to keep it.`;
+          this.touch();
+        }
+        if (sp && !sp.exam_ids.includes(id)) { sp.exam_ids.push(id); this.touch(); }
+        this.lookMsg[key] = msg;
+        this.examInput[key] = '';
+      } catch (e) { this.lookMsg[key] = '❌ ' + e.message; }
+      this.looking[key] = false;
+    },
+    async refreshExam(ce) {
+      const i = this.cfg.custom_exams.indexOf(ce), key = 'r_' + i;
+      this.looking[key] = true; this.error = '';
+      try {
+        const r = await this.lookup(ce.typed_name || ce.name, ce.id);
+        if (r.exam) { Object.assign(ce, r.exam, {id: ce.id}); this.touch(); this.flash = `Updated ${ce.name} from the web. Save to keep it.`; }
+      } catch (e) { this.error = e.message; }
+      this.looking[key] = false;
+    },
     async runSpace(sp, dry) {
       try { await this.api('POST', `/api/spaces/${sp.id}/run?dry=${dry}`); this.flash = `Started “${sp.name}”${dry ? ' (dry run, nothing will be posted)' : ''}. Progress shows on the dashboard.`; this.tab = 'dash'; this.refresh(); }
       catch (e) { this.error = e.message; }
@@ -488,8 +557,8 @@ function app() {
       });
       return w;
     },
-    examName(id) { return this.examDefs[id]?.name || id; },
-    examShort(id) { return this.examDefs[id]?.short_name || id; },
+    examName(id) { return this.allExams()[id]?.name || id; },
+    examShort(id) { return this.allExams()[id]?.short_name || id; },
     langName(k) { return this.catalogue.languages?.[k] || k; },
     icon(p) { return {telegram: '✈️', youtube: '▶️', instagram: '📸'}[p] || ''; },
     fmt(t) { if (!t) return '—'; const d = new Date(t); return isNaN(d) ? t : d.toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'}); },

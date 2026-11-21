@@ -108,7 +108,8 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
         result["messages"].append(tg.send_message(chat, f"{head}\n\n<b>“{safe_html(m.trick)}”</b>\n\n{lines}{tip}"[:4096])["message_id"])
 
     for q in (pkg.mcqs if "questions" in include else []):
-        result["messages"].append(tg.send_quiz(chat, q.question, q.options, q.correct_index, q.explanation)["message_id"])
+        stem = f"[{q.pyq_reference}] {q.question}" if q.pyq_reference else q.question  # previous-year question: show exam + year
+        result["messages"].append(tg.send_quiz(chat, stem[:300], q.options, q.correct_index, q.explanation)["message_id"])
         time.sleep(1.2)
 
     if "pdf" in assets and "pdf" in include:

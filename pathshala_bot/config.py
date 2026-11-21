@@ -150,6 +150,7 @@ class Exam:
     audience: str
     subjects: dict[str, list[str]]
     telegram_chat: str | None = None
+    details: str = ""  # conducting body, pattern... (researched profiles)
 
     def random_seed(self, rng: random.Random, subject: str | None = None) -> tuple[str, str]:
         subj = subject if subject in self.subjects else rng.choice(list(self.subjects))

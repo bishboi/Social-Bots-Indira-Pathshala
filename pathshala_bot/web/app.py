@@ -168,6 +168,35 @@ def create_app(with_bot: bool = True) -> FastAPI:
                 "provider": settings.llm_provider, "database": "supabase" if supabase_configured() else "sqlite",
                 "db_error": db_error}
 
+    @app.post("/api/exams/lookup", dependencies=guard)
+    async def exam_lookup(request: Request):
+        """Typed exam name -> a known exam, or a new profile researched on the web (not saved until the panel saves)."""
+        import asyncio
+
+        from .. import exam_research
+
+        body = await request.json()
+        cfg = control.load()
+        if body.get("custom_exams") is not None:  # unsaved exams in the browser count as known
+            for ce in body["custom_exams"]:
+                try:
+                    c = control.CustomExam.model_validate(ce)
+                except Exception:
+                    continue
+                if all(x.id != c.id for x in cfg.custom_exams):
+                    cfg.custom_exams.append(c)
+        control.apply(cfg)
+        try:
+            return await asyncio.to_thread(exam_research.lookup, cfg, str(body.get("name", "")), body.get("refresh_id"))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:  # no API key, provider error...
+            log.exception("exam lookup failed")
+            msg = str(e)
+            if any(w in msg.lower() for w in ("api_key", "authentication", "auth_token", "401", "invalid x-api-key", "incorrect api key")):
+                msg = f"the AI provider ({settings.llm_provider}) has no valid API key - add it in Settings → Keys"
+            raise HTTPException(502, f"Could not research the exam: {msg[:300]}") from e
+
     @app.post("/api/spaces/{sid}/run", dependencies=guard)
     async def run_space_now(sid: str, dry: bool = False):
         cfg = control.load()

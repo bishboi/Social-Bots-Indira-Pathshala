@@ -32,6 +32,8 @@ EN: dict[str, str] = {
     "k_title": "DID YOU KNOW?", "k_bullets": "KEY POINTS", "k_fact": "FACT", "k_quiz": "QUIZ TIME", "k_reveal": "ANSWER",
     "k_timeline": "TIMELINE", "k_map": "ON THE MAP", "k_formula": "FORMULA", "k_comparison": "COMPARE", "k_image": "LOOK",
     "k_cta": "FOLLOW", "join_telegram": "Join Telegram",
+    "k_pyq": "PREVIOUS YEAR QUESTION", "answer": "Answer", "solution": "Solution",
+    "pyq_opener": "Friends, this question was asked in the {exam} exam in {year}...",
     # Telegram
     "memory_trick": "Memory trick", "pdf_caption": "Free PDF notes by {brand}", "top_stories": "Today's top stories",
     # newspaper
@@ -63,6 +65,8 @@ HI: dict[str, str] = {
     "k_title": "क्या आप जानते हैं?", "k_bullets": "मुख्य बिंदु", "k_fact": "रोचक तथ्य", "k_quiz": "क्विज़ टाइम", "k_reveal": "सही उत्तर",
     "k_timeline": "समयरेखा", "k_map": "मानचित्र पर", "k_formula": "सूत्र", "k_comparison": "तुलना", "k_image": "देखिए",
     "k_cta": "फॉलो करें", "join_telegram": "Telegram जॉइन करें",
+    "k_pyq": "पिछले वर्ष का प्रश्न", "answer": "उत्तर", "solution": "हल",
+    "pyq_opener": "दोस्तों, यह प्रश्न साल {year} में {exam} परीक्षा में पूछा गया था...",
     "memory_trick": "याद रखने की ट्रिक", "pdf_caption": "{brand} के निःशुल्क PDF नोट्स", "top_stories": "आज के मुख्य समाचार",
     "akhbar_title": "इंदिरा पाठशाला समसामयिकी पत्रिका", "akhbar_title_top": "इंदिरा पाठशाला",
     "akhbar_title_main": "समसामयिकी पत्रिका", "edition": "{region} संस्करण", "national_edition": "राष्ट्रीय संस्करण",
@@ -133,7 +137,8 @@ def translate_pack(code: str) -> dict[str, str]:
     model: type[BaseModel] = create_model(f"Labels_{code}", **{k: (str, ...) for k in source})
     system = (f"You translate short user-interface labels for an Indian exam-preparation brand into {lang.name} "
               f"({lang.native}), written in the {lang.script} script as specified. {lang.ai_rule()}")
-    user = ("Translate each value. Rules: keep {brand} and {region} placeholders exactly; keep 'Telegram', 'PDF', 'Quiz' "
+    user = ("Translate each value. Rules: keep {brand}, {region}, {exam} and {year} placeholders exactly; pyq_opener is spoken "
+            "warmly by a teacher to students at the start of a video (like 'Dosto, ...' in Hindi); keep 'Telegram', 'PDF', 'Quiz' "
             "brand/technical words if that is how they are normally written; keep labels short (newspaper/app style); "
             "keys starting with region_ are names of Indian states/UTs - give their standard name in this language; "
             "akhbar_title is the newspaper's name: render 'Indira Pathshala' as a proper name plus a natural translation of "
@@ -143,7 +148,7 @@ def translate_pack(code: str) -> dict[str, str]:
     pack = {k: str(v).strip() for k, v in out.model_dump().items() if str(v).strip()}
     # keep placeholders intact
     for k, v in list(pack.items()):
-        for ph in ("{brand}", "{region}"):
+        for ph in ("{brand}", "{region}", "{exam}", "{year}"):
             if ph in source[k] and ph not in v:
                 pack[k] = source[k]
     return pack
@@ -166,10 +171,11 @@ def labels(code: str | None, translate: bool = True) -> dict[str, str]:
     pack = _cached_pack(code, cache.stat().st_mtime if cache.exists() else 0.0)
     import time
 
-    if translate and len(pack) < len(base) * 0.9 and time.time() - _failed.get(code, 0) > RETRY_AFTER:
+    # translate when labels are missing (first use, or new labels added in an update)
+    if translate and set(base) - set(pack) and time.time() - _failed.get(code, 0) > RETRY_AFTER:
         with _lock:
             pack = _cached_pack(code, cache.stat().st_mtime if cache.exists() else 0.0)
-            if len(pack) < len(base) * 0.9:
+            if set(base) - set(pack):
                 try:
                     fresh = translate_pack(code)
                     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -185,6 +191,20 @@ def labels(code: str | None, translate: bool = True) -> dict[str, str]:
 def t(code: str | None, key: str, **fmt) -> str:
     text = labels(code).get(key, EN.get(key, key))
     return text.format(**fmt) if fmt else text
+
+
+HINGLISH_PYQ_OPENER = "Dosto, yeh prashan saal {year} me {exam} exam me poocha gaya tha..."
+
+
+def pyq_opener(code: str | None, exam: str, year: str) -> str:
+    """Opening line of a previous-year-question short, e.g. 'Dosto, yeh prashan saal 2021 me RPSC SI exam me poocha gaya tha...'."""
+    if (code or "").lower() == "hinglish":
+        return HINGLISH_PYQ_OPENER.format(exam=exam, year=year)
+    text = labels(code).get("pyq_opener") or EN["pyq_opener"]
+    try:
+        return text.format(exam=exam, year=year)
+    except (KeyError, IndexError):  # a hand-edited label with broken placeholders
+        return EN["pyq_opener"].format(exam=exam, year=year)
 
 
 def region_name(code: str | None, region: str) -> str:

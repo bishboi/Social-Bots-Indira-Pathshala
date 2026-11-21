@@ -62,6 +62,16 @@ class CustomExam(BaseModel):
     language: Language = "hi"
     audience: str = ""
     subjects: dict[str, list[str]] = Field(default_factory=dict)
+    # filled when the exam was added by typing its name (AI web research)
+    typed_name: str = ""
+    conducting_body: str = ""
+    pattern: str = ""
+    sources: list[str] = Field(default_factory=list)
+    researched_on: str = ""
+
+    def details(self) -> str:
+        parts = [f"Conducted by {self.conducting_body}." if self.conducting_body else "", f"Pattern: {self.pattern}" if self.pattern else ""]
+        return " ".join(p for p in parts if p)
 
 
 class NewsEdition(BaseModel):
@@ -367,7 +377,7 @@ def all_exam_defs(cfg: ControlConfig) -> dict[str, Exam]:
     exams = dict(load_catalogue())
     for c in cfg.custom_exams:
         exams[c.id] = Exam(id=c.id, name=c.name, short_name=c.short_name, language=c.language,
-                           audience=c.audience, subjects=c.subjects)
+                           audience=c.audience, subjects=c.subjects, details=c.details())
     return exams
 
 

@@ -27,7 +27,8 @@ PLATFORMS = ("telegram", "youtube", "instagram")
 
 # How often each format is picked on a random run.
 TYPE_WEIGHTS = {
-    "pyq_quiz": 3,
+    "previous_year_question": 3,
+    "pyq_quiz": 2,
     "concept_explainer": 2,
     "cheatsheet": 2,
     "formula_sheet": 1,
@@ -97,6 +98,8 @@ def pick_type(exam: Exam, subject: str, rng: random.Random) -> str:
 
 def pick_style(exam: Exam, subject: str, content_type: str, rng: random.Random) -> str:
     """Choose a video style that suits the topic, with some variety."""
+    if content_type == "previous_year_question":
+        return "pyq_reveal"
     geo_subj, hist_subj, formula_subj = bool(GEO_SUBJECTS.search(subject)), bool(HISTORY_SUBJECTS.search(subject)), bool(FORMULA_SUBJECTS.search(subject))
     options: dict[str, float] = {"concept_explainer": 1}
     if content_type == "pyq_quiz":
@@ -266,7 +269,8 @@ def run(
     if video_style and video_style not in VIDEO_STYLES:
         raise KeyError(f"Unknown video style '{video_style}'. Known: {', '.join(VIDEO_STYLES)}")
     if not from_json:
-        video_style = video_style or pick_style(exam, subject, content_type, rng)
+        # a previous-year question always uses its own reel (opening line naming the exam and year)
+        video_style = "pyq_reveal" if content_type == "previous_year_question" else (video_style or pick_style(exam, subject, content_type, rng))
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = settings.output_dir / f"{stamp}_{exam.id}_{content_type}"

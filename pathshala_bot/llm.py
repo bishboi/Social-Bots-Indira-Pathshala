@@ -61,6 +61,15 @@ class MnemonicReview(BaseModel):
     improved: Mnemonic | None = Field(default=None, description="The final trick for 'keep' (unchanged) or 'rewrite' (new); null for 'drop'.")
 
 
+PYQ_RESEARCH = """5. THIS FORMAT NEEDS ONE REAL PREVIOUS-YEAR QUESTION. Find a question on this topic (or, if none exists, on a closely
+   related topic of the same subject - then make that the chosen topic) that was actually asked in a past paper of this exam.
+   Take it from the official question paper / answer key, or a reputable archive that names the exam, year and paper.
+   Record under PREVIOUS-YEAR QUESTION FOR THE VIDEO: exam as students call it, year (and shift/date if known), the question,
+   the 4 options exactly, the OFFICIAL answer, a step-by-step solution and the source URL. Check the answer against the answer key.
+   If you cannot verify any real past-paper question, write: NO VERIFIED PYQ FOUND.
+"""
+
+
 def research_topic(exam: Exam, subject: str, seed_topic: str, content_type: str, avoid: list[str]) -> Research:
     """Search the web for a specific, high-yield sub-topic and gather verified facts."""
     avoid_txt = "\n".join(f"- {t}" for t in avoid[:30]) or "- (none yet)"
@@ -69,6 +78,7 @@ Today is {date.today().isoformat()}.
 
 Target exam: {exam.name}
 Audience: {exam.audience}
+{('About the exam: ' + exam.details) if exam.details else ''}
 Subject: {subject}
 Seed topic: {seed_topic}
 Planned format: {content_type} - {CONTENT_TYPES[content_type]}
@@ -81,7 +91,7 @@ Use web search to:
 2. Choose ONE specific, high-yield sub-topic of the seed topic that fits the planned format.
 3. Collect accurate facts, numbers, dates, formulas, legal section numbers etc. for it. Cross-check anything that sources disagree on and prefer official / authoritative sources. For current_affairs, only use developments from the last 6 months.
 4. If you find real previous-year questions on it, record them verbatim with exam name and year.
-
+{PYQ_RESEARCH if content_type == "previous_year_question" else ""}
 Reply with research notes in English (the writer will translate):
 CHOSEN TOPIC: <one line>
 WHY HIGH-YIELD: <1-2 lines>
@@ -108,11 +118,18 @@ Standards:
 - Image scenes: name an English Wikipedia article whose lead photo shows the subject (a fort, monument, person, landform). Only use when a real photo adds value.
 - Formula scenes: valid LaTeX math (no $), symbols explained in 'terms'.
 - Never claim a question is a previous-year question unless the research notes show it is.
+- previous_year_question format: put the verified past-paper question from the notes in 'pyq' (exactly as asked, translated only if
+  the paper's language differs) and make it the FIRST MCQ too, with pyq_reference '<exam> <year>'. The video (style pyq_reveal)
+  starts with a 'title' scene whose heading is the exam and year - its narration is replaced by a fixed opening line, so do not
+  repeat the exam/year after it; next a 'quiz' scene with that question and its 4 options (shorten options only if needed, same
+  order), then 'reveal', then 1-2 scenes on the solution and the facts behind it, then 'cta'. If the notes say NO VERIFIED PYQ FOUND,
+  set pyq to null and write a previous-year-style quiz instead.
 
 {MNEMONIC_RULES}"""
 
     user = f"""Exam: {exam.name} ({exam.short_name})
 Audience: {exam.audience}
+{('About the exam: ' + exam.details) if exam.details else ''}
 Subject: {subject}
 Format: {content_type} - {CONTENT_TYPES[content_type]}
 Video style: {video_style} - {VIDEO_STYLES.get(video_style, "")}
@@ -128,6 +145,7 @@ Create the complete content package for this topic."""
     pkg = structured(system, user, ContentPackage, max_tokens=32000)
     pkg.content_type = content_type  # type: ignore[assignment]
     pkg.short.style = video_style
+    apply_pyq(pkg, exam)
     if settings.mnemonic_review and (pkg.mnemonic is not None or content_type == "mnemonic_trick"):
         try:
             pkg.mnemonic = review_mnemonic(exam, pkg)
@@ -136,6 +154,80 @@ Create the complete content package for this topic."""
             if mnemonic_issues(pkg.mnemonic):
                 pkg.mnemonic = None
     return sanitize(pkg)
+
+
+def _valid_pyq(q) -> bool:
+    return bool(q and q.year.strip() and q.exam_name.strip() and q.question.strip() and len([o for o in q.options if o.strip()]) >= 2
+                and 0 <= q.correct_index < len(q.options))
+
+
+def apply_pyq(pkg: ContentPackage, exam: Exam) -> ContentPackage:
+    """previous_year_question: open the short with the fixed line, make the real question the first quiz/MCQ and a notes section.
+
+    Without a verified question the post becomes a previous-year-style quiz (pyq_quiz)."""
+    from . import i18n
+    from .models import MCQ, NoteSection, Scene
+
+    if pkg.content_type != "previous_year_question":
+        pkg.pyq = None
+        return pkg
+    q = pkg.pyq
+    if not _valid_pyq(q):
+        log.warning("no verified previous-year question found - posting as pyq_quiz instead")
+        pkg.pyq = None
+        pkg.content_type = "pyq_quiz"  # type: ignore[assignment]
+        return pkg
+    lang = exam.language
+    exam_name, year = q.exam_name.strip(), q.year.strip()
+    opener = i18n.pyq_opener(lang, exam_name, year)
+    scenes = pkg.short.scenes
+    first = scenes[0] if scenes and scenes[0].kind == "title" else None
+    if first is None:
+        first = Scene(kind="title", heading="", narration="")
+        scenes.insert(0, first)
+    first.heading = f"{exam_name} · {year}"
+    first.body = i18n.t(lang, "k_pyq")
+    first.narration = opener
+    quiz = next((sc for sc in scenes if sc.kind == "quiz"), None)
+    if quiz is None:
+        quiz = Scene(kind="quiz", heading=i18n.t(lang, "k_pyq"), body=q.question, narration=q.question, options=list(q.options))
+        reveal = Scene(kind="reveal", heading=i18n.t(lang, "answer"), body=q.options[q.correct_index],
+                       narration=q.solution[:300], options=list(q.options), correct_index=q.correct_index)
+        scenes[1:1] = [quiz, reveal]
+    i = scenes.index(quiz)
+    if i != 1:  # the question comes right after the opening line, followed by its answer
+        moved = [scenes.pop(i)]
+        if i < len(scenes) and scenes[i].kind == "reveal":
+            moved.append(scenes.pop(i))
+        scenes[1:1] = moved
+    from .agent import is_repeat
+
+    # the on-screen question is always the real one, with the paper's options and the official answer
+    other_question = not is_repeat(quiz.body or quiz.heading, [q.question], 0.6)
+    if other_question:
+        quiz.narration = q.question  # the model's narration was about another question
+    quiz.body, quiz.options, quiz.correct_index = q.question, list(q.options), q.correct_index
+    if len(scenes) > 2 and scenes[2].kind == "reveal":
+        rv, answer = scenes[2], q.options[q.correct_index]
+        rv.options, rv.correct_index = list(q.options), q.correct_index
+        rv.heading = f"{i18n.t(lang, 'answer')}: {answer}"
+        rv.body = ""
+        if other_question:
+            rv.narration = f"{i18n.t(lang, 'answer')}: {answer}. {q.solution[:220]}"
+    ref = f"{exam_name} {year}"
+
+    rest = [m for m in pkg.mcqs if not is_repeat(m.question, [q.question], 0.75)]
+    pkg.mcqs = [MCQ(question=q.question, options=list(q.options), correct_index=q.correct_index, explanation=q.solution[:190],
+                    difficulty="medium", pyq_reference=ref)] + rest[:4]
+    mark = lambda i, o: ("✔ " if i == q.correct_index else "") + o  # noqa: E731
+    pkg.notes.insert(0, NoteSection(heading=f"{i18n.t(lang, 'k_pyq')}: {ref}",
+                                    paragraphs=[q.question, f"{i18n.t(lang, 'solution')}: {q.solution}"],
+                                    bullets=[mark(i, o) for i, o in enumerate(q.options)]))
+    if q.source_url and all(s.url != q.source_url for s in pkg.sources):
+        from .models import Source
+
+        pkg.sources.insert(0, Source(title=ref, url=q.source_url))
+    return pkg
 
 
 def sanitize(pkg: ContentPackage) -> ContentPackage:

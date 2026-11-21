@@ -10,6 +10,7 @@
   python -m pathshala_bot bot          # bot only, legacy .env schedule
   python -m pathshala_bot exams        # list exams
   python -m pathshala_bot spaces       # list spaces
+  python -m pathshala_bot exam-lookup "Rajasthan Patwari" [--save]   # research an exam by name
 """
 
 from __future__ import annotations
@@ -64,11 +65,31 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bot", help="Telegram bot only, with the legacy POST_TIMES schedule")
     sub.add_parser("exams", help="list configured exams")
     sub.add_parser("spaces", help="list spaces from the admin panel")
+    el = sub.add_parser("exam-lookup", help="find an exam by name; unknown exams are researched on the web (prints the profile)")
+    el.add_argument("name", help="exam name as you'd type it, e.g. 'Rajasthan Patwari'")
+    el.add_argument("--save", action="store_true", help="add a researched exam to the panel's custom exams")
 
     a = ap.parse_args(argv)
     if a.cmd == "exams":
         for e in load_exams().values():
             print(f"{e.id:16} {e.language:9} {e.name}  [{', '.join(e.subjects)}]")
+        return 0
+    if a.cmd == "exam-lookup":
+        import json as _json
+
+        from . import control, exam_research
+
+        cfg = control.load()
+        control.apply(cfg)
+        res = exam_research.lookup(cfg, a.name)
+        if "match" in res:
+            print(f"Already in the catalogue: {res['match']} ({res['name']})")
+            return 0
+        print(_json.dumps(res["exam"], ensure_ascii=False, indent=2))
+        if a.save:
+            cfg.custom_exams.append(control.CustomExam.model_validate(res["exam"]))
+            control.save(cfg)
+            print(f"Saved as custom exam '{res['exam']['id']}'. Add it to a space in the panel.")
         return 0
     if a.cmd == "spaces":
         from . import control

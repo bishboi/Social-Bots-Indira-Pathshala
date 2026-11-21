@@ -10,9 +10,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-ContentType = Literal["pyq_quiz", "concept_explainer", "cheatsheet", "formula_sheet", "mnemonic_trick", "current_affairs"]
+ContentType = Literal["previous_year_question", "pyq_quiz", "concept_explainer", "cheatsheet", "formula_sheet", "mnemonic_trick", "current_affairs"]
 
 CONTENT_TYPES: dict[str, str] = {
+    "previous_year_question": "One REAL question from an actual past paper of this exam (exam name + year, verified from the official paper / answer key), solved step by step, with the related high-yield facts.",
     "pyq_quiz": "Previous-year-question style quiz: questions modelled on real past papers of this exam, with solutions.",
     "concept_explainer": "One concept explained simply from first principles, with an example and common mistakes.",
     "cheatsheet": "A dense one-page revision cheatsheet of the most-asked facts on the topic.",
@@ -34,6 +35,18 @@ class MCQ(BaseModel):
     )
 
 
+class PYQ(BaseModel):
+    """A real previous-year question, as it appeared in the paper."""
+
+    exam_name: str = Field(description="The exam as students know it, short, in the content language, e.g. 'RPSC SI', 'JEE Main', 'REET Level 2'.")
+    year: str = Field(description="Year of the paper, e.g. '2021' (add shift/date only if the source gives it, e.g. '2023 (Shift 2)').")
+    question: str = Field(description="The question as asked (translated into the content language if needed, meaning unchanged), max 280 characters.")
+    options: list[str] = Field(description="The 4 options as in the paper, each max 90 characters, no 'A)' prefixes.")
+    correct_index: int = Field(description="0-based index of the correct option according to the official answer key.")
+    solution: str = Field(description="Step-by-step solution / explanation, max 600 characters.")
+    source_url: str = Field(description="URL of the question paper / answer key / reliable PYQ archive the question was taken from.")
+
+
 class CheatRow(BaseModel):
     term: str = Field(description="Fact / term / formula name, short.")
     detail: str = Field(description="The fact, value or formula itself, one line.")
@@ -46,6 +59,7 @@ VIDEO_STYLES: dict[str, str] = {
     "formula_breakdown": "Formula reel: hook -> 1-3 formula scenes (LaTeX + meaning of each symbol) -> bullets with a worked example -> quiz -> reveal -> cta.",
     "top_facts": "Countdown of facts: hook -> 3-5 fact scenes (one striking fact each, big number/keyword) -> cta.",
     "concept_explainer": "Concept explainer: hook -> bullets / comparison / image scenes building the idea step by step -> quiz -> reveal -> cta.",
+    "pyq_reveal": "Previous-year question reel: hook naming the exam and year -> the real question as a quiz scene (on-screen countdown) -> reveal -> 1-2 scenes explaining the solution and related facts -> cta.",
     "slideshow": "Simple static slides: hook -> 3-5 bullets/fact scenes -> quiz -> reveal -> cta.",
 }
 
@@ -160,6 +174,10 @@ class ContentPackage(BaseModel):
         description="A memory trick ONLY if the topic has a list, sequence, set of dates/numbers or an easily-confused pair worth memorising; else null.",
     )
     mcqs: list[MCQ] = Field(description="3-5 exam-level multiple choice questions of mixed difficulty.")
+    pyq: PYQ | None = Field(
+        default=None,
+        description="previous_year_question format only: the real past-paper question found in the research notes. Null if the notes contain no verified past-paper question (never invent one) and for every other format.",
+    )
     short: ShortVideo
     notes: list[NoteSection] = Field(description="4-7 sections of printable revision notes covering the topic in depth.")
     sources: list[Source] = Field(description="Web sources actually used during research (from the research notes).")

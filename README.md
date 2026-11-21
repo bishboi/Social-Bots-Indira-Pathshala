@@ -2,7 +2,7 @@
 
 An automated exam-prep content pipeline, a Telegram bot, an **admin panel** for configuring everything, and a **daily current-affairs newspaper**. Each content run:
 
-1. **Picks a fresh topic for a space**: a space is a group of one or more exams (Rajasthan SI, JEE Main, NEET, CBSE 10, RBSE 12, REET, SSC CGL…) with its own channels. The space's agent reads what the space already posted and chooses an exam, subject, topic and format that it hasn't covered recently: previous-year-style quiz, concept explainer, cheatsheet, formula sheet, memory trick or current affairs. See [Spaces](#spaces).
+1. **Picks a fresh topic for a space**: a space is a group of one or more exams (Rajasthan SI, JEE Main, NEET, CBSE 10, RBSE 12, REET, SSC CGL…) with its own channels. The space's agent reads what the space already posted and chooses an exam, subject, topic and format that it hasn't covered recently: a real previous-year question, previous-year-style quiz, concept explainer, cheatsheet, formula sheet, memory trick or current affairs. See [Spaces](#spaces).
 2. **Researches it on the internet.** The AI (Claude or OpenAI, your choice – see [AI provider](#ai-provider)), using its web search tool, checks the current syllabus and previous-year question trends, picks one high-yield sub-topic it hasn't covered recently, and gathers facts from the sources it cites.
 3. **Writes every asset in one structured call:** the Telegram post, 3–5 MCQs, a cheatsheet, a memory trick, the script for a 6–9 slide short and the PDF revision notes. The content comes out in Hindi, English or Hinglish, depending on the exam.
 4. **Renders**
@@ -89,9 +89,9 @@ Then open http://localhost:8080. You'll get a login page: sign in as `admin` (or
 | Tab | What you configure |
 |---|---|
 | **Dashboard** | Upcoming runs, what's running now, recent runs (with their space) and links to their PDFs and videos, and setup warnings (e.g. a missing API key, a space with no channels) |
-| **Spaces** | Your spaces: the exams in each, the connected channels, what to create (shorts/reels, PDF notes, quiz questions, post + card + memory trick), content types, video styles, language, an optional focus note for the agent, how many past topics to avoid, and when it runs (**every X hours** from a start time, or **at set times** each day, on chosen days; or manual only). Each space has **Run now** and **Dry run** (generate without posting) buttons and shows its recent topics. |
+| **Spaces** | Your spaces: the exams in each (type their names), the connected channels, what to create (shorts/reels, PDF notes, quiz questions, post + card + memory trick), content types, video styles, language, an optional focus note for the agent, how many past topics to avoid, and when it runs (**every X hours** from a start time, or **at set times** each day, on chosen days; or manual only). Each space has **Run now** and **Dry run** (generate without posting) buttons and shows its recent topics. |
 | **Channels** | Any number of Telegram channels, YouTube accounts and Instagram accounts. Each has its own credentials, an on/off switch and a **Test** button. |
-| **Exams** | The exam catalogue the spaces pick from (built-in exams from `exams.yaml`, with their language and subjects, and which spaces use them). You can add custom exams with their own subjects and topics. |
+| **Exams** | The exam catalogue the spaces use: built-in exams from `exams.yaml` plus exams you added by name, with their language, subjects, conducting body, pattern and sources. Type a name to add one, edit what the AI found, or **Refresh from web**. |
 | **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels, and when the newspaper runs |
 | **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, how many runs may render at the same time, and API keys. Keys are stored on the server and only ever shown masked. |
 
@@ -121,6 +121,26 @@ python -m pathshala_bot spaces
 ```bash
 python -m pathshala_bot run --space rajasthan-si --dry-run
 ```
+
+### Adding exams by name
+
+In a space (or the **Exams** tab), type an exam's name, e.g. *Rajasthan Patwari*, *UP Police Constable*, *Bihar Daroga*, *CTET Paper 2*, and press **Add**:
+
+- If it's already in the catalogue (built-in or added before), it's added straight away. Matching ignores case and punctuation, and works on the short name, the full name or the id.
+- Otherwise the AI searches the web for the official notification and syllabus and builds the exam's profile: full and short name, conducting body, current pattern (papers, marks, negative marking), the language most aspirants study in, the audience, and the syllabus as subjects with topics, plus the sources it used. This takes about a minute and needs your AI key.
+
+The new exam is saved with the rest of the settings when you click **Save changes**. Check and edit it in the **Exams** tab. The agent reads the pattern and conducting body when it plans and writes. From the command line: `python -m pathshala_bot exam-lookup "Rajasthan Patwari" --save`.
+
+### Previous-year question (`previous_year_question`)
+
+A content type built around **one real question from a past paper**. The research step looks for a question on the topic in the official question paper or answer key, or a reputable archive that names the exam and year, and checks the official answer. The short (style `pyq_reveal`) then:
+
+1. opens with the exam and year on screen and the line *"Dosto, yeh prashan saal 2021 me RPSC SI exam me poocha gaya tha…"* (Hindi: *"दोस्तों, यह प्रश्न साल 2021 में RPSC SI परीक्षा में पूछा गया था…"*; other languages get the same line translated)
+2. shows the question with its four options and a countdown
+3. reveals the official answer
+4. explains the solution and related facts, then the call to action
+
+The same question is the first Telegram quiz poll, tagged `[RPSC SI 2021]`. The PDF notes open with the question, the marked answer and the solution, and the source is listed. If no verifiable past-paper question is found, the post is made as a previous-year-*style* quiz (`pyq_quiz`) instead, never with an invented year. The agent picks this format by itself; to post only this format in a space, select just `previous_year_question` under Content types.
 
 ## Daily current-affairs newspaper (Akhbar)
 

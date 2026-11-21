@@ -220,6 +220,8 @@ class Short(Scene):
         play, left, finish = self.clock(dur)
         lab = self.header_label("quiz", accent)
         q = self.txt(s["body"] or s["heading"], size=62, max_w=8.0).to_edge(self.E, buff=0.55)
+        if q.height > 4.6:  # long real past-paper questions
+            q.scale_to_fit_height(4.6).to_edge(self.E, buff=0.55)
         q.set_y(TOP - 0.7 - q.height / 2)
         opts = self._options(s, accent).next_to(q, DOWN, buff=0.6).set_x(0)
         room = opts.get_top()[1] - (BOTTOM + 2.2)
