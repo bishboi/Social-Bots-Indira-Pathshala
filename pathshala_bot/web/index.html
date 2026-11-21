@@ -61,7 +61,7 @@
   <div class="bar">
     <div class="brand" x-text="(cfg?.general?.brand_name || 'Pathshala') + ' · Control'"></div>
     <span class="pill" :class="status.db_error ? 'bad' : ''" x-show="status.database" x-text="'DB: ' + (status.database === 'supabase' ? 'Supabase' : 'local SQLite')"></span>
-    <span class="pill" :class="status.worker?.running ? 'warn' : 'ok'" x-text="status.worker?.running ? 'Running: ' + status.worker.running.schedule : 'Idle'"></span>
+    <span class="pill" :class="(status.worker?.running||[]).length ? 'warn' : 'ok'" x-text="(status.worker?.running||[]).length ? 'Running: ' + status.worker.running.map(r => r.name).join(', ') : 'Idle'"></span>
     <span class="muted" x-show="dirty">Unsaved changes</span>
     <button class="btn primary" :disabled="!dirty || saving" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
     <form method="post" action="/logout" style="margin:0" @submit="dirty && !confirm('You have unsaved changes. Log out anyway?') && $event.preventDefault()"><button class="btn" type="submit">Log out</button></form>
@@ -93,7 +93,8 @@
       <div class="card">
         <h3>Upcoming runs</h3>
         <template x-for="j in status.jobs || []"><div class="row" style="justify-content:space-between"><span x-text="j.name"></span><span class="muted" x-text="fmt(j.next_run)"></span></div></template>
-        <div class="muted" x-show="!(status.jobs||[]).length">No active schedules.</div>
+        <div class="muted" x-show="!(status.jobs||[]).length">Nothing scheduled.</div>
+        <template x-for="r in status.worker?.running || []"><div class="row"><span class="pill warn" x-text="r.state"></span><span x-text="r.name"></span><span class="muted" x-text="'since ' + fmt(r.started)"></span></div></template>
       </div>
       <div class="card">
         <h3>Connected channels</h3>
@@ -113,17 +114,17 @@
     <div class="card">
       <h3>Recent runs</h3>
       <div class="table-wrap"><table>
-        <tr><th>When</th><th>Exam</th><th class="hide-sm">Type</th><th>Topic / lead story</th><th>Status</th><th>Files</th></tr>
+        <tr><th>When</th><th>Space</th><th>Exam</th><th class="hide-sm">Type</th><th>Topic / lead story</th><th>Status</th><th>Files</th></tr>
         <template x-for="r in status.runs || []">
           <tr>
-            <td x-text="fmt(r.created_at)"></td><td x-text="r.exam_id"></td><td class="hide-sm" x-text="r.content_type"></td>
+            <td x-text="fmt(r.created_at)"></td><td x-text="spaceName(r.space_id)"></td><td x-text="r.exam_id"></td><td class="hide-sm" x-text="r.content_type"></td>
             <td x-text="r.topic"></td>
             <td><span class="pill" :class="{ok: r.status==='ok', warn: r.status==='partial', bad: r.status==='failed'}" x-text="r.status"></span></td>
             <td><template x-for="f in r.files"><a :href="'/files/' + r.run + '/' + f" target="_blank" x-text="f" style="display:block"></a></template></td>
           </tr>
         </template>
       </table></div>
-      <div class="muted" x-show="!(status.runs||[]).length">Nothing has run yet. Use “Run now” on a schedule.</div>
+      <div class="muted" x-show="!(status.runs||[]).length">Nothing has run yet. Use “Run now” on a space.</div>
     </div>
   </section>
 
@@ -163,25 +164,80 @@
     </template>
   </section>
 
+  <!-- ============ SPACES ============ -->
+  <section x-show="tab==='spaces'">
+    <div class="section-title"><h2>Spaces</h2><button class="btn" @click="addSpace()">+ Space</button></div>
+    <p class="muted">A space groups one or more exams with the channels they post to. Each space has its own agent: on every run (scheduled or “Run now”) it looks at what this space already posted, chooses a different topic from one of its exams, builds the content you switched on below and posts it to the space's channels. Spaces run independently of each other.</p>
+    <div class="card" x-show="!cfg.spaces.length"><div class="muted">No spaces yet. Add one, pick its exams and connect channels.</div></div>
+    <template x-for="(sp, i) in cfg.spaces" :key="sp._key || sp.id">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <div class="row"><b x-text="'🧭 ' + (sp.name || 'New space')"></b>
+            <span class="pill" :class="sp.enabled && sp.schedule.enabled ? 'ok' : ''" x-text="describeSpace(sp)"></span></div>
+          <div class="row">
+            <label class="toggle"><input type="checkbox" x-model="sp.enabled" @change="touch()"> enabled</label>
+            <button class="btn" @click="runSpace(sp, false)" :disabled="dirty" title="Save first">Run now</button>
+            <button class="btn" @click="runSpace(sp, true)" :disabled="dirty" title="Generate without posting">Dry run</button>
+            <button class="btn danger" @click="cfg.spaces.splice(i,1); touch()">Remove</button>
+          </div>
+        </div>
+        <div class="grid">
+          <div><label>Name</label><input x-model="sp.name" @input="touch()" placeholder="e.g. Rajasthan Police"></div>
+          <div><label>ID (used in /generate and the CLI)</label><input x-model="sp.id" @input="touch()" :disabled="!sp._new"></div>
+          <div><label>Language</label><select x-model="sp.language" @change="sp.language = sp.language || null; touch()">
+            <option value="">Each exam's own language</option>
+            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="sp.language===k"></option></template></select></div>
+          <div><label>Remember last N topics (not repeated)</label><input type="number" min="0" max="500" x-model.number="sp.memory" @input="touch()"></div>
+        </div>
+        <div style="margin-top:10px"><label>Exams in this space <span class="muted">(one or more; the agent picks topics across them)</span></label><div class="chips">
+          <template x-for="(e, id) in examDefs"><button class="chip" :class="sp.exam_ids.includes(id) && 'on'" @click="toggle(sp.exam_ids, id)" :title="e.name" x-text="e.short_name"></button></template></div></div>
+        <div style="margin-top:10px"><label>Connected channels <span class="muted">(posts go only to these)</span></label><div class="chips">
+          <template x-for="c in cfg.channels"><button class="chip" :class="sp.channel_ids.includes(c.id) && 'on'" @click="toggle(sp.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div>
+          <div class="muted" x-show="!cfg.channels.length">Add channels in the Channels tab first.</div></div>
+        <div style="margin-top:10px"><label>What to create &amp; post</label><div class="chips">
+          <button class="chip" :class="sp.outputs.short && 'on'" @click="sp.outputs.short=!sp.outputs.short; touch()">🎬 Shorts / Reels</button>
+          <button class="chip" :class="sp.outputs.pdf && 'on'" @click="sp.outputs.pdf=!sp.outputs.pdf; touch()">📄 PDF notes</button>
+          <button class="chip" :class="sp.outputs.questions && 'on'" @click="sp.outputs.questions=!sp.outputs.questions; touch()">❓ Quiz questions</button>
+          <button class="chip" :class="sp.outputs.card && 'on'" @click="sp.outputs.card=!sp.outputs.card; touch()">🖼 Post + card + memory trick</button>
+        </div></div>
+        <div style="margin-top:10px"><label>Content types (none = the agent decides)</label><div class="chips">
+          <template x-for="(v,k) in catalogue.content_types"><button class="chip" :title="v" :class="sp.content_types.includes(k) && 'on'" @click="toggle(sp.content_types, k)" x-text="k"></button></template></div></div>
+        <div style="margin-top:10px" x-show="sp.outputs.short"><label>Video styles (none = automatic)</label><div class="chips">
+          <template x-for="(v,k) in catalogue.video_styles"><button class="chip" :title="v" :class="sp.video_styles.includes(k) && 'on'" @click="toggle(sp.video_styles, k)" x-text="k"></button></template></div></div>
+        <div style="margin-top:10px"><label>Focus for the agent (optional)</label>
+          <textarea x-model="sp.focus" @input="touch()" rows="2" placeholder="e.g. Prefer Rajasthan GK and current affairs; keep maths to one post a week"></textarea></div>
+        <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line)">
+          <label class="toggle"><input type="checkbox" x-model="sp.schedule.enabled" @change="touch()"> run automatically</label>
+          <div class="grid" style="margin-top:8px" x-show="sp.schedule.enabled">
+            <div><label>Repeat</label><select x-model="sp.schedule.mode" @change="touch()"><option value="interval">Every X hours</option><option value="daily">At set times each day</option></select></div>
+            <template x-if="sp.schedule.mode==='interval'"><div><label>Every (hours)</label><input type="number" min="0.25" step="0.25" x-model.number="sp.schedule.every_hours" @input="touch()"></div></template>
+            <template x-if="sp.schedule.mode==='interval'"><div><label>Starting at (HH:MM)</label><input x-model="sp.schedule.start_at" @input="touch()" placeholder="07:00"></div></template>
+            <template x-if="sp.schedule.mode==='daily'"><div><label>Times (HH:MM, comma separated)</label><input :value="sp.schedule.times.join(', ')" @change="sp.schedule.times = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div></template>
+          </div>
+          <div style="margin-top:8px" x-show="sp.schedule.enabled"><label>Days</label><div class="chips">
+            <template x-for="d in days"><button class="chip" :class="sp.schedule.days.includes(d) && 'on'" @click="toggle(sp.schedule.days, d)" x-text="d"></button></template></div></div>
+          <div class="muted" x-show="!sp.schedule.enabled">Manual only: use “Run now”, or /generate <span x-text="sp.id"></span> in the Telegram bot.</div>
+        </div>
+        <div style="margin-top:10px" x-show="spaceRuns(sp.id).length"><label>Recent topics in this space</label>
+          <template x-for="r in spaceRuns(sp.id)"><div class="muted"><span x-text="fmt(r.created_at)"></span> · <span x-text="examShort(r.exam_id)"></span> · <span x-text="r.topic"></span></div></template></div>
+      </div>
+    </template>
+  </section>
+
   <!-- ============ EXAMS ============ -->
   <section x-show="tab==='exams'">
-    <div class="section-title"><h2>Target exams</h2><button class="btn" @click="newExam()">+ Custom exam</button></div>
+    <div class="section-title"><h2>Exams</h2><button class="btn" @click="newExam()">+ Custom exam</button></div>
     <div class="card"><div class="table-wrap"><table>
-      <tr><th>On</th><th>Exam</th><th>Language</th><th>Weight</th><th>Post to channels <span class="muted">(none = all)</span></th></tr>
-      <template x-for="es in cfg.exams" :key="es.exam_id">
+      <tr><th>Exam</th><th>Language</th><th>Used in spaces</th></tr>
+      <template x-for="(e, id) in examDefs" :key="id">
         <tr>
-          <td><input type="checkbox" x-model="es.enabled" @change="touch()" style="width:auto"></td>
-          <td><b x-text="examName(es.exam_id)"></b><div class="muted" x-text="(examDefs[es.exam_id]?.subjects||[]).join(' · ')"></div></td>
-          <td style="min-width:160px"><select x-model="es.language" @change="es.language = es.language || null; touch()">
-            <option value="" x-text="'Default (' + langName(examDefs[es.exam_id]?.language) + ')'"></option>
-            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="es.language===k"></option></template>
-          </select></td>
-          <td style="width:80px"><input type="number" min="0" step="0.5" x-model.number="es.weight" @input="touch()"></td>
-          <td><div class="chips"><template x-for="c in cfg.channels"><button class="chip" :class="es.channel_ids.includes(c.id) && 'on'" @click="toggle(es.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div></td>
+          <td><b x-text="e.name"></b> <span class="muted" x-text="'(' + id + ')'"></span><div class="muted" x-text="e.subjects.join(' · ')"></div></td>
+          <td x-text="langName(e.language)"></td>
+          <td x-text="cfg.spaces.filter(s => s.exam_ids.includes(id)).map(s => s.name).join(', ') || '—'"></td>
         </tr>
       </template>
     </table></div>
-    <p class="muted">Weight = how often an exam is picked relative to the others. Built-in exams and their syllabus seeds live in exams.yaml.</p></div>
+    <p class="muted">The catalogue the spaces pick from. Built-in exams and their syllabus seeds live in exams.yaml; add your own below. A space's language setting overrides the exam's language.</p></div>
 
     <template x-for="(ce, i) in cfg.custom_exams" :key="i">
       <div class="card">
@@ -195,62 +251,7 @@
           <div style="grid-column: 1/-1"><label>Subjects — one per line: <code>Subject: topic one; topic two</code></label>
             <textarea :value="subjectsText(ce)" @change="ce.subjects = parseSubjects($event.target.value); touch()"></textarea></div>
         </div>
-      </div>
-    </template>
-  </section>
-
-  <!-- ============ SCHEDULES ============ -->
-  <section x-show="tab==='schedules'">
-    <div class="section-title"><h2>Schedules</h2>
-      <div class="row"><button class="btn" @click="addSchedule('content')">+ Content schedule</button><button class="btn" @click="addSchedule('akhbar')">+ Daily newspaper</button></div>
-    </div>
-    <template x-for="(s, i) in cfg.schedules" :key="s.id">
-      <div class="card">
-        <div class="row" style="justify-content:space-between; margin-bottom:8px">
-          <div class="row"><b x-text="s.kind==='akhbar' ? '🗞 Current-affairs newspaper' : '📚 Content'"></b>
-            <span class="pill" x-text="describe(s)"></span></div>
-          <div class="row">
-            <label class="toggle"><input type="checkbox" x-model="s.enabled" @change="touch()"> enabled</label>
-            <button class="btn" @click="runNow(s, false)" :disabled="dirty" title="Save first">Run now</button>
-            <button class="btn" @click="runNow(s, true)" :disabled="dirty" title="Generate without posting">Dry run</button>
-            <button class="btn danger" @click="cfg.schedules.splice(i,1); touch()">Remove</button>
-          </div>
-        </div>
-        <div class="grid">
-          <div><label>Name</label><input x-model="s.name" @input="touch()"></div>
-          <div><label>Repeat</label><select x-model="s.mode" @change="touch()"><option value="interval">Every X hours</option><option value="daily">At set times each day</option></select></div>
-          <template x-if="s.mode==='interval'"><div><label>Every (hours)</label><input type="number" min="0.25" step="0.25" x-model.number="s.every_hours" @input="touch()"></div></template>
-          <template x-if="s.mode==='interval'"><div><label>Starting at (HH:MM)</label><input x-model="s.start_at" @input="touch()" placeholder="07:00"></div></template>
-          <template x-if="s.mode==='daily'"><div><label>Times (HH:MM, comma separated)</label><input :value="s.times.join(', ')" @change="s.times = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div></template>
-          <div><label>Language</label><select x-model="s.language" @change="s.language = s.language || null; touch()">
-            <option value="">Exam's language</option>
-            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="s.language===k"></option></template></select></div>
-        </div>
-        <div style="margin-top:10px"><label>Days</label><div class="chips">
-          <template x-for="d in ['mon','tue','wed','thu','fri','sat','sun']"><button class="chip" :class="s.days.includes(d) && 'on'" @click="toggle(s.days, d)" x-text="d"></button></template></div></div>
-        <div style="margin-top:10px" x-show="s.kind==='content'"><label>Exams (none = any enabled exam)</label><div class="chips">
-          <template x-for="es in cfg.exams.filter(e=>e.enabled)"><button class="chip" :class="s.exam_ids.includes(es.exam_id) && 'on'" @click="toggle(s.exam_ids, es.exam_id)" x-text="examShort(es.exam_id)"></button></template></div></div>
-        <div style="margin-top:10px" x-show="s.kind==='akhbar'"><label>Editions (one paper each; none = all enabled editions)</label><div class="chips">
-          <template x-for="ed in cfg.editions.filter(e=>e.enabled)"><button class="chip" :class="s.edition_ids.includes(ed.id) && 'on'" @click="toggle(s.edition_ids, ed.id)" x-text="editionName(ed)"></button></template></div>
-          <div class="muted" x-show="!cfg.editions.some(e=>e.enabled)">No editions enabled – add one in the Newspaper tab.</div></div>
-        <template x-if="s.kind==='content'"><div>
-          <div style="margin-top:10px"><label>What to create &amp; post</label><div class="chips">
-            <button class="chip" :class="s.outputs.short && 'on'" @click="s.outputs.short=!s.outputs.short; touch()">🎬 Shorts / Reels</button>
-            <button class="chip" :class="s.outputs.pdf && 'on'" @click="s.outputs.pdf=!s.outputs.pdf; touch()">📄 PDF notes</button>
-            <button class="chip" :class="s.outputs.questions && 'on'" @click="s.outputs.questions=!s.outputs.questions; touch()">❓ Quiz questions</button>
-            <button class="chip" :class="s.outputs.card && 'on'" @click="s.outputs.card=!s.outputs.card; touch()">🖼 Post + card + memory trick</button>
-          </div></div>
-          <div style="margin-top:10px"><label>Content types (none = automatic)</label><div class="chips">
-            <template x-for="(v,k) in catalogue.content_types"><button class="chip" :title="v" :class="s.content_types.includes(k) && 'on'" @click="toggle(s.content_types, k)" x-text="k"></button></template></div></div>
-          <div style="margin-top:10px" x-show="s.outputs.short"><label>Video styles (none = automatic)</label><div class="chips">
-            <template x-for="(v,k) in catalogue.video_styles"><button class="chip" :title="v" :class="s.video_styles.includes(k) && 'on'" @click="toggle(s.video_styles, k)" x-text="k"></button></template></div></div>
-        </div></template>
-        <template x-if="s.kind==='akhbar'"><div style="margin-top:10px">
-          <label class="toggle"><input type="checkbox" x-model="s.outputs.questions" @change="touch()"> also post the day's quiz as Telegram polls</label>
-          <p class="muted">One paper per edition (state or Central, per language), shared by every exam of that region. The AI decides which news matters. Language override above applies to all chosen editions.</p>
-        </div></template>
-        <div style="margin-top:10px"><label x-text="s.kind==='akhbar' ? 'Channels (none = each edition\'s channels)' : 'Channels (none = each exam\'s channels)'"></label><div class="chips">
-          <template x-for="c in cfg.channels.filter(c => s.kind==='content' || c.platform==='telegram')"><button class="chip" :class="s.channel_ids.includes(c.id) && 'on'" @click="toggle(s.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div></div>
+        <p class="muted">Save to add it to the catalogue, then add it to a space.</p>
       </div>
     </template>
   </section>
@@ -258,7 +259,7 @@
   <!-- ============ NEWSPAPER ============ -->
   <section x-show="tab==='news'">
     <div class="section-title"><h2>Newspaper editions</h2><button class="btn" @click="addEdition()">+ Edition</button></div>
-    <p class="muted">Each edition is one daily current-affairs paper for a region in one language. A <b>state</b> edition (e.g. Rajasthan) is the same paper for every exam of that state – PSC, police, subordinate boards, teacher recruitment – with state news first, then national and international. The <b>Central</b> edition covers national and international news for UPSC, SSC, banking, railways and defence exams. When they run is set in Schedules (“+ Daily newspaper”).</p>
+    <p class="muted">Each edition is one daily current-affairs paper for a region in one language. A <b>state</b> edition (e.g. Rajasthan) is the same paper for every exam of that state – PSC, police, subordinate boards, teacher recruitment – with state news first, then national and international. The <b>Central</b> edition covers national and international news for UPSC, SSC, banking, railways and defence exams. When they run is set below.</p>
     <template x-for="(ed, i) in cfg.editions" :key="ed.id">
       <div class="card">
         <div class="row" style="justify-content:space-between; margin-bottom:8px">
@@ -277,6 +278,37 @@
         </div>
         <div style="margin-top:10px"><label>Post to Telegram channels (none = all enabled Telegram channels)</label><div class="chips">
           <template x-for="c in cfg.channels.filter(c=>c.platform==='telegram')"><button class="chip" :class="ed.channel_ids.includes(c.id) && 'on'" @click="toggle(ed.channel_ids, c.id)" x-text="'✈️ '+c.name"></button></template></div></div>
+      </div>
+    </template>
+    <div class="section-title" style="margin-top:20px"><h2>When the newspaper runs</h2><button class="btn" @click="addSchedule()">+ Newspaper schedule</button></div>
+    <template x-for="(s, i) in cfg.schedules" :key="s.id">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <div class="row"><b>🗞 Newspaper schedule</b><span class="pill" x-text="describe(s)"></span></div>
+          <div class="row">
+            <label class="toggle"><input type="checkbox" x-model="s.enabled" @change="touch()"> enabled</label>
+            <button class="btn" @click="runNow(s, false)" :disabled="dirty" title="Save first">Run now</button>
+            <button class="btn" @click="runNow(s, true)" :disabled="dirty" title="Generate without posting">Dry run</button>
+            <button class="btn danger" @click="cfg.schedules.splice(i,1); touch()">Remove</button>
+          </div>
+        </div>
+        <div class="grid">
+          <div><label>Name</label><input x-model="s.name" @input="touch()"></div>
+          <div><label>Repeat</label><select x-model="s.mode" @change="touch()"><option value="interval">Every X hours</option><option value="daily">At set times each day</option></select></div>
+          <template x-if="s.mode==='interval'"><div><label>Every (hours)</label><input type="number" min="0.25" step="0.25" x-model.number="s.every_hours" @input="touch()"></div></template>
+          <template x-if="s.mode==='interval'"><div><label>Starting at (HH:MM)</label><input x-model="s.start_at" @input="touch()" placeholder="07:00"></div></template>
+          <template x-if="s.mode==='daily'"><div><label>Times (HH:MM, comma separated)</label><input :value="s.times.join(', ')" @change="s.times = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div></template>
+          <div><label>Language</label><select x-model="s.language" @change="s.language = s.language || null; touch()">
+            <option value="">Edition's language</option>
+            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="s.language===k"></option></template></select></div>
+        </div>
+        <div style="margin-top:10px"><label>Days</label><div class="chips">
+          <template x-for="d in days"><button class="chip" :class="s.days.includes(d) && 'on'" @click="toggle(s.days, d)" x-text="d"></button></template></div></div>
+        <div style="margin-top:10px"><label>Editions (one paper each; none = all enabled editions)</label><div class="chips">
+          <template x-for="ed in cfg.editions.filter(e=>e.enabled)"><button class="chip" :class="s.edition_ids.includes(ed.id) && 'on'" @click="toggle(s.edition_ids, ed.id)" x-text="editionName(ed)"></button></template></div></div>
+        <div style="margin-top:10px"><label class="toggle"><input type="checkbox" x-model="s.outputs.questions" @change="touch()"> also post the day's quiz as Telegram polls</label></div>
+        <div style="margin-top:10px"><label>Channels (none = each edition's channels)</label><div class="chips">
+          <template x-for="c in cfg.channels.filter(c => c.platform==='telegram')"><button class="chip" :class="s.channel_ids.includes(c.id) && 'on'" @click="toggle(s.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div></div>
       </div>
     </template>
   </section>
@@ -300,6 +332,7 @@
       <div><label>Timezone</label><input x-model="cfg.general.timezone" @input="touch()" placeholder="Asia/Kolkata"></div>
       <div><label>Voice-over</label><select x-model="cfg.general.tts_provider" @change="touch()"><option value="auto">Auto (Gemini TTS → Edge)</option><option value="gemini">Gemini TTS</option><option value="edge">Edge TTS (free)</option><option value="elevenlabs">ElevenLabs</option><option value="none">No voice</option></select></div>
       <div><label>&nbsp;</label><label class="toggle"><input type="checkbox" x-model="cfg.general.mnemonic_review" @change="touch()"> review memory tricks (extra AI call)</label></div>
+      <div><label>Runs at the same time (spaces + newspaper)</label><input type="number" min="1" max="8" x-model.number="cfg.general.max_parallel_runs" @input="touch()"></div>
     </div></div>
     <div class="card"><h3>Daily newspaper</h3><div class="grid">
       <div><label>Title (Hindi)</label><input x-model="cfg.general.akhbar_title_hi" @input="touch()"></div>
@@ -321,7 +354,8 @@
 function app() {
   return {
     tab: 'dash', cfg: null, loadError: '', stopped: false, catalogue: {}, examDefs: {}, status: {}, dirty: false, saving: false, error: '', flash: '', tests: {},
-    tabs: [{id:'dash',label:'Dashboard'},{id:'channels',label:'Channels'},{id:'exams',label:'Exams'},{id:'schedules',label:'Schedules'},{id:'news',label:'Newspaper'},{id:'settings',label:'Settings'}],
+    tabs: [{id:'dash',label:'Dashboard'},{id:'spaces',label:'Spaces'},{id:'channels',label:'Channels'},{id:'exams',label:'Exams'},{id:'news',label:'Newspaper'},{id:'settings',label:'Settings'}],
+    days: ['mon','tue','wed','thu','fri','sat','sun'],
     async init() {
       for (;;) {  // keep retrying until the settings load (e.g. database fixed while the page is open)
         if (this.stopped) return;
@@ -352,7 +386,9 @@ function app() {
     async save() {
       this.saving = true; this.error = '';
       try {
-        const d = await this.api('PUT', '/api/config', this.cfg);
+        const body = JSON.parse(JSON.stringify(this.cfg));
+        body.spaces.forEach(s => { delete s._new; delete s._key; });
+        const d = await this.api('PUT', '/api/config', body);
         this.cfg = d.config; this.catalogue = d.catalogue; this.examDefs = d.exam_defs; this.dirty = false;
         this.flash = 'Saved. Schedules reloaded.'; await this.refresh();
       } catch (e) { this.error = e.message; }
@@ -365,11 +401,19 @@ function app() {
         chat_id: '', send_video: true, client_id: '', client_secret: '', refresh_token: '', privacy: 'public', user_id: '', access_token: ''});
       this.touch();
     },
-    addSchedule(kind) {
-      this.cfg.schedules.push({id: this.uid(), name: kind === 'akhbar' ? 'Daily newspaper' : 'New schedule', enabled: true, kind,
-        mode: kind === 'akhbar' ? 'daily' : 'interval', every_hours: 6, start_at: '07:00', times: ['07:00'],
-        days: ['mon','tue','wed','thu','fri','sat','sun'], exam_ids: [], edition_ids: [], content_types: [], video_styles: [],
-        outputs: {card: true, questions: true, pdf: true, short: kind === 'content'}, channel_ids: [], language: null});
+    addSchedule() {
+      this.cfg.schedules.push({id: this.uid(), name: 'Daily newspaper', enabled: true, kind: 'akhbar',
+        mode: 'daily', every_hours: 24, start_at: '07:00', times: ['07:00'], days: [...this.days], edition_ids: [],
+        outputs: {card: true, questions: true, pdf: true, short: false}, channel_ids: [], language: null});
+      this.touch();
+    },
+    addSpace() {
+      const used = new Set(this.cfg.spaces.map(s => s.id));
+      let n = this.cfg.spaces.length + 1, id = 'space-' + n;
+      while (used.has(id)) id = 'space-' + (++n);
+      this.cfg.spaces.push({id, _key: this.uid(), _new: true, name: '', enabled: true, exam_ids: [], channel_ids: [], language: null, focus: '',
+        outputs: {card: true, questions: true, pdf: true, short: true}, content_types: [], video_styles: [], memory: 40,
+        schedule: {enabled: true, mode: 'interval', every_hours: 6, start_at: '07:00', times: ['08:00'], days: [...this.days]}});
       this.touch();
     },
     addEdition() {
@@ -389,7 +433,11 @@ function app() {
       return r + ' · ' + this.langName(ed.language);
     },
     newExam() { this.cfg.custom_exams.push({id: '', name: '', short_name: '', language: this.cfg.general.default_language, audience: '', subjects: {}}); this.touch(); },
-    removeCustom(i) { const id = this.cfg.custom_exams[i].id; this.cfg.custom_exams.splice(i, 1); this.cfg.exams = this.cfg.exams.filter(e => e.exam_id !== id); this.touch(); },
+    removeCustom(i) {
+      const id = this.cfg.custom_exams[i].id, users = this.cfg.spaces.filter(s => s.exam_ids.includes(id)).map(s => s.name);
+      if (users.length && !confirm(`Remove this exam from ${users.join(', ')} as well?`)) return;
+      this.cfg.custom_exams.splice(i, 1); this.cfg.spaces.forEach(s => { s.exam_ids = s.exam_ids.filter(x => x !== id); }); this.touch();
+    },
     subjectsText(ce) { return Object.entries(ce.subjects || {}).map(([s, t]) => s + ': ' + t.join('; ')).join('\n'); },
     parseSubjects(text) {
       const out = {};
@@ -405,6 +453,16 @@ function app() {
       try { const r = await this.api('POST', `/api/channels/${c.id}/test`); this.tests[c.id] = (r.ok ? '✅ ' : '❌ ') + r.detail; }
       catch (e) { this.tests[c.id] = '❌ ' + e.message; }
     },
+    async runSpace(sp, dry) {
+      try { await this.api('POST', `/api/spaces/${sp.id}/run?dry=${dry}`); this.flash = `Started “${sp.name}”${dry ? ' (dry run, nothing will be posted)' : ''}. Progress shows on the dashboard.`; this.tab = 'dash'; this.refresh(); }
+      catch (e) { this.error = e.message; }
+    },
+    describeSpace(sp) {
+      if (!sp.enabled) return 'off';
+      return sp.schedule.enabled ? this.describe({...sp.schedule, enabled: true}) : 'manual only';
+    },
+    spaceRuns(id) { return (this.status.runs || []).filter(r => r.space_id === id && r.topic).slice(0, 5); },
+    spaceName(id) { return id ? (this.cfg?.spaces.find(s => s.id === id)?.name || id) : '—'; },
     async runNow(s, dry) {
       try { await this.api('POST', `/api/schedules/${s.id}/run?dry=${dry}`); this.flash = `Started “${s.name}”${dry ? ' (dry run, nothing will be posted)' : ''}. Progress shows on the dashboard.`; this.tab = 'dash'; this.refresh(); }
       catch (e) { this.error = e.message; }
@@ -423,7 +481,11 @@ function app() {
       if (!openai && !this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings (or switch the AI provider to OpenAI) – nothing can be generated without it.');
       if (!this.cfg.secrets.telegram_bot_token) w.push('Add a Telegram bot token in Settings to post to Telegram.');
       if (!this.cfg.channels.some(c => c.enabled)) w.push('No channels are enabled.');
-      if (!this.cfg.exams.some(e => e.enabled)) w.push('No exams are enabled.');
+      if (!this.cfg.spaces.some(s => s.enabled)) w.push('No spaces are enabled – add one in the Spaces tab.');
+      this.cfg.spaces.filter(s => s.enabled).forEach(s => {
+        if (!s.exam_ids.length) w.push(`Space “${s.name}” has no exams.`);
+        if (!s.channel_ids.length) w.push(`Space “${s.name}” has no connected channels – its runs are generated but not posted.`);
+      });
       return w;
     },
     examName(id) { return this.examDefs[id]?.name || id; },

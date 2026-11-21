@@ -8,10 +8,13 @@ Use `get_history()` rather than constructing a backend directly.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -24,7 +27,8 @@ CREATE TABLE IF NOT EXISTS runs (
     run_dir TEXT,
     status TEXT,
     publish TEXT,
-    content TEXT
+    content TEXT,
+    space_id TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_exam ON runs(exam_id, created_at);
 CREATE TABLE IF NOT EXISTS headlines (
@@ -52,6 +56,9 @@ class SQLiteHistory:
             cols = {r[1] for r in c.execute("PRAGMA table_info(runs)")}
             if "content" not in cols:  # databases created before content was stored
                 c.execute("ALTER TABLE runs ADD COLUMN content TEXT")
+            if "space_id" not in cols:  # databases created before spaces
+                c.execute("ALTER TABLE runs ADD COLUMN space_id TEXT")
+            c.execute("CREATE INDEX IF NOT EXISTS runs_space ON runs(space_id, id)")
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -65,13 +72,27 @@ class SQLiteHistory:
         return [r[0] for r in rows]
 
     def record(self, exam_id: str, subject: str, topic: str, content_type: str, run_dir: str, status: str,
-               publish: dict, content: dict | None = None) -> None:
+               publish: dict, content: dict | None = None, space_id: str | None = None) -> None:
         with closing(self._conn()) as c, c:
             c.execute(
-                "INSERT INTO runs(created_at, exam_id, subject, topic, content_type, run_dir, status, publish, content) VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO runs(created_at, exam_id, subject, topic, content_type, run_dir, status, publish, content, space_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (_now(), exam_id, subject, topic, content_type, run_dir, status, json.dumps(publish, ensure_ascii=False),
-                 json.dumps(content, ensure_ascii=False) if content is not None else None),
+                 json.dumps(content, ensure_ascii=False) if content is not None else None, space_id),
             )
+
+    def space_topics(self, space_id: str, exam_ids: list[str], limit: int = 40) -> list[dict]:
+        """Recent topics of a space, newest first: {created_at, exam_id, subject, topic, content_type}.
+
+        Also counts runs of the space's exams made before spaces existed (space_id empty)."""
+        marks = ",".join("?" * len(exam_ids)) or "''"
+        with closing(self._conn()) as c:
+            c.row_factory = sqlite3.Row
+            rows = c.execute(
+                f"SELECT created_at, exam_id, subject, topic, content_type FROM runs WHERE topic IS NOT NULL AND topic != '' "
+                f"AND content_type != 'akhbar' AND (space_id=? OR (space_id IS NULL AND exam_id IN ({marks}))) ORDER BY id DESC LIMIT ?",
+                (space_id, *exam_ids, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def recent_headlines(self, exam_id: str, days: int = 7) -> list[str]:
         since = (date.today() - timedelta(days=days)).isoformat()
@@ -91,7 +112,7 @@ class SQLiteHistory:
         with closing(self._conn()) as c:
             c.row_factory = sqlite3.Row
             rows = c.execute(
-                "SELECT id, created_at, exam_id, subject, topic, content_type, run_dir, status, publish FROM runs ORDER BY id DESC LIMIT ?",
+                "SELECT id, created_at, exam_id, space_id, subject, topic, content_type, run_dir, status, publish FROM runs ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -128,9 +149,31 @@ class SupabaseHistory:
         return [r["topic"] for r in rows if r.get("topic")]
 
     def record(self, exam_id: str, subject: str, topic: str, content_type: str, run_dir: str, status: str,
-               publish: dict, content: dict | None = None) -> None:
-        self.db.insert("runs", {"exam_id": exam_id, "subject": subject, "topic": topic, "content_type": content_type,
-                                "run_dir": run_dir, "status": status, "publish": publish, "content": content})
+               publish: dict, content: dict | None = None, space_id: str | None = None) -> None:
+        row = {"exam_id": exam_id, "subject": subject, "topic": topic, "content_type": content_type,
+               "run_dir": run_dir, "status": status, "publish": publish, "content": content}
+        if space_id:
+            row["space_id"] = space_id
+        try:
+            self.db.insert("runs", row)
+        except Exception as e:
+            if "space_id" not in row or "space_id" not in str(e):
+                raise
+            log.warning("runs.space_id column missing - run supabase/schema.sql again to add it; saving without it")
+            row.pop("space_id")
+            self.db.insert("runs", row)
+
+    def space_topics(self, space_id: str, exam_ids: list[str], limit: int = 40) -> list[dict]:
+        cols = "created_at,exam_id,subject,topic,content_type"
+        base = {"select": cols, "topic": "neq.", "content_type": "neq.akhbar", "order": "id.desc", "limit": str(limit)}
+        exams = ",".join(f'"{e}"' for e in exam_ids)
+        try:
+            rows = self.db.select("runs", {**base, "or": f"(space_id.eq.{space_id},and(space_id.is.null,exam_id.in.({exams})))"})
+        except Exception as e:
+            if "space_id" not in str(e):
+                raise
+            rows = self.db.select("runs", {**base, "exam_id": f"in.({exams})"})  # schema not updated yet
+        return [r for r in rows if r.get("topic")]
 
     def recent_headlines(self, exam_id: str, days: int = 7) -> list[str]:
         since = (date.today() - timedelta(days=days)).isoformat()
@@ -145,8 +188,13 @@ class SupabaseHistory:
         return self.db.count("runs", {"exam_id": f"eq.{exam_id}", "content_type": "eq.akhbar", "status": "neq.failed"})
 
     def runs(self, limit: int = 50) -> list[dict]:
-        rows = self.db.select("runs", {"select": "id,created_at,exam_id,subject,topic,content_type,run_dir,status,publish",
-                                       "order": "id.desc", "limit": str(limit)})
+        params = {"select": "id,created_at,exam_id,space_id,subject,topic,content_type,run_dir,status,publish", "order": "id.desc", "limit": str(limit)}
+        try:
+            rows = self.db.select("runs", params)
+        except Exception as e:
+            if "space_id" not in str(e):
+                raise
+            rows = self.db.select("runs", {**params, "select": params["select"].replace("space_id,", "")})
         for r in rows:
             r["publish"] = json.dumps(r.get("publish") or {}, ensure_ascii=False)  # same shape as SQLite
         return rows

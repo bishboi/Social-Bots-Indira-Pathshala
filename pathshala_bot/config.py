@@ -147,7 +147,6 @@ class Exam:
     name: str
     short_name: str
     language: str
-    weight: float
     audience: str
     subjects: dict[str, list[str]]
     telegram_chat: str | None = None
@@ -167,7 +166,6 @@ def load_exams(path: Path | None = None) -> dict[str, Exam]:
             name=raw["name"],
             short_name=raw.get("short_name", raw["name"]),
             language=raw.get("language", "en"),
-            weight=float(raw.get("weight", 1)),
             audience=raw.get("audience", ""),
             subjects={k: list(v) for k, v in raw["subjects"].items()},
             telegram_chat=raw.get("telegram_chat"),

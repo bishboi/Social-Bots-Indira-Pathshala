@@ -28,7 +28,7 @@ def ctl(tmp_path, monkeypatch):
 
 def test_seed_and_roundtrip(ctl):
     cfg = ctl.load()
-    assert {e.exam_id for e in cfg.exams} >= {"rajasthan-si", "jee-main"}
+    assert [s.exam_ids for s in cfg.spaces] == [["rajasthan-si"]]
     assert any(s.kind == "akhbar" for s in cfg.schedules)
     cfg.general.brand_name = "Test Brand"
     ctl.save(cfg)
@@ -60,30 +60,9 @@ def test_validation_rejects_bad_schedules(ctl):
     with pytest.raises(ValueError, match="HH:MM"):
         ctl.merge_from_ui(ctl.load(), view)
     view = ctl.public_view(ctl.load())
-    view["schedules"][0]["exam_ids"] = ["no-such-exam"]
+    view["spaces"][0]["exam_ids"] = ["no-such-exam"]
     with pytest.raises(ValueError, match="unknown"):
         ctl.merge_from_ui(ctl.load(), view)
-
-
-def test_language_override_and_channel_routing(ctl):
-    cfg = ctl.load()
-    a = ctl.Channel(name="A", platform="telegram", chat_id="@a")
-    b = ctl.Channel(name="B", platform="telegram", chat_id="@b")
-    off = ctl.Channel(name="Off", platform="telegram", chat_id="@c", enabled=False)
-    cfg.channels = [a, b, off]
-    for es in cfg.exams:
-        if es.exam_id == "jee-main":
-            es.language = "hinglish"
-            es.channel_ids = [b.id]
-        if es.exam_id == "neet-ug":
-            es.enabled = False
-    exams = ctl.effective_exams(cfg)
-    assert exams["jee-main"].language == "hinglish" and "neet-ug" not in exams
-    assert ctl.effective_exams(cfg, "en")["rajasthan-si"].language == "en"  # schedule-level override
-    assert [c.name for c in ctl.channels_for(cfg, "jee-main")] == ["B"]
-    assert [c.name for c in ctl.channels_for(cfg, "rajasthan-si")] == ["A", "B"]  # none chosen = all enabled
-    sched = ctl.Schedule(name="s", channel_ids=[a.id])
-    assert [c.name for c in ctl.channels_for(cfg, "jee-main", sched)] == ["A"]  # schedule wins
 
 
 def test_custom_exam(ctl):
@@ -91,11 +70,13 @@ def test_custom_exam(ctl):
     view = ctl.public_view(cfg)
     view["custom_exams"] = [{"id": "raj-patwari", "name": "Rajasthan Patwari", "short_name": "Patwari", "language": "hi",
                              "audience": "x", "subjects": {"Rajasthan GK": ["Rivers"]}}]
+    view["spaces"][0]["exam_ids"].append("raj-patwari")
+    view["spaces"][0]["language"] = "en"
     ctl.save(ctl.merge_from_ui(cfg, view))
     cfg = ctl.load()
-    es = next(e for e in cfg.exams if e.exam_id == "raj-patwari")
-    es.enabled = True
-    assert ctl.effective_exams(cfg)["raj-patwari"].subjects == {"Rajasthan GK": ["Rivers"]}
+    exams = ctl.space_exams(cfg, cfg.spaces[0])
+    assert exams["raj-patwari"].subjects == {"Rajasthan GK": ["Rivers"]}
+    assert {e.language for e in exams.values()} == {"en"}  # space language wins
 
 
 def test_triggers():
@@ -114,34 +95,6 @@ def test_triggers():
     assert (nxt.weekday(), nxt.hour, nxt.minute) == (0, 18, 30)
 
 
-def test_execute_content_schedule_uses_outputs_and_channels(ctl, monkeypatch):
-    from pathshala_bot import pipeline, scheduler
-
-    cfg = ctl.load()
-    ch = ctl.Channel(name="T", platform="telegram", chat_id="@t")
-    cfg.channels = [ch]
-    s = ctl.Schedule(name="Quiz only", exam_ids=["jee-main"], content_types=["pyq_quiz"],
-                     outputs=ctl.Outputs(card=False, pdf=False, short=False, questions=True))
-    cfg.schedules = [s]
-    ctl.save(cfg)
-    seen = {}
-
-    class R:
-        def summary(self):
-            return "ok"
-
-    def fake_run(**kw):
-        seen.update(kw)
-        return R()
-
-    monkeypatch.setattr(pipeline, "run", fake_run)
-    assert scheduler.execute(s.id) == "ok"
-    assert seen["exam_id"] == "jee-main" and seen["content_type"] == "pyq_quiz"
-    assert seen["outputs"] == {"questions"} and [c.name for c in seen["channels"]] == ["T"]
-    scheduler.execute(s.id, dry_run=True)
-    assert seen["channels"] == []
-
-
 def test_web_api_auth_and_config(ctl, monkeypatch):
     from fastapi.testclient import TestClient
 
@@ -156,9 +109,11 @@ def test_web_api_auth_and_config(ctl, monkeypatch):
         cfg = r.json()["config"]
         cfg["schedules"][0]["every_hours"] = 3
         cfg["schedules"][0]["mode"] = "interval"
+        cfg["schedules"][0]["enabled"] = True
         assert client.put("/api/config", json=cfg, auth=("admin", "pw")).status_code == 200
         st = client.get("/api/status", auth=("admin", "pw")).json()
-        assert any(j["name"] == cfg["schedules"][0]["name"] for j in st["jobs"])
+        names = {j["name"] for j in st["jobs"]}
+        assert cfg["schedules"][0]["name"] in names and "Space · Rajasthan SI" in names
         cfg["general"]["timezone"] = "Mars/Olympus"
         assert client.put("/api/config", json=cfg, auth=("admin", "pw")).status_code == 400
         assert client.get("/files/../control.json/x", auth=("admin", "pw")).status_code == 404
@@ -236,10 +191,10 @@ def test_editions_routing_and_validation(ctl):
     with pytest.raises(ValueError, match="same language"):
         ctl.merge_from_ui(cfg, view)
     view["editions"][-1].update(region="Uttar Pradesh", id="stale-id")
-    sched_view = view["schedules"][1]
+    sched_view = view["schedules"][0]
     sched_view["edition_ids"] = ["stale-id"]
     merged = ctl.merge_from_ui(cfg, view)
-    assert merged.editions[-1].id == "uttar-pradesh-hi" and merged.schedules[1].edition_ids == ["uttar-pradesh-hi"]
+    assert merged.editions[-1].id == "uttar-pradesh-hi" and merged.schedules[0].edition_ids == ["uttar-pradesh-hi"]
     view["editions"][-1]["region"] = "Atlantis"
     with pytest.raises(ValueError, match="unknown region"):
         ctl.merge_from_ui(cfg, view)

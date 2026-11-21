@@ -2,7 +2,7 @@
 
 An automated exam-prep content pipeline, a Telegram bot, an **admin panel** for configuring everything, and a **daily current-affairs newspaper**. Each content run:
 
-1. **Picks a target exam**: Rajasthan SI, JEE Main, NEET, CBSE 10, RBSE 12, REET, SSC CGL… (weighted random, or the one you choose). It then picks a subject, a seed topic and a format: previous-year-style quiz, concept explainer, cheatsheet, formula sheet, memory trick or current affairs.
+1. **Picks a fresh topic for a space**: a space is a group of one or more exams (Rajasthan SI, JEE Main, NEET, CBSE 10, RBSE 12, REET, SSC CGL…) with its own channels. The space's agent reads what the space already posted and chooses an exam, subject, topic and format that it hasn't covered recently: previous-year-style quiz, concept explainer, cheatsheet, formula sheet, memory trick or current affairs. See [Spaces](#spaces).
 2. **Researches it on the internet.** The AI (Claude or OpenAI, your choice – see [AI provider](#ai-provider)), using its web search tool, checks the current syllabus and previous-year question trends, picks one high-yield sub-topic it hasn't covered recently, and gathers facts from the sources it cites.
 3. **Writes every asset in one structured call:** the Telegram post, 3–5 MCQs, a cheatsheet, a memory trick, the script for a 6–9 slide short and the PDF revision notes. The content comes out in Hindi, English or Hinglish, depending on the exam.
 4. **Renders**
@@ -27,6 +27,7 @@ pathshala_bot/
   geo.py            accurate maps: official boundaries, rivers, gazetteer lookups
   resources.py      Wikipedia / Wikimedia Commons: coordinates, freely-licensed photos + credits
   publish/          telegram.py, youtube.py, instagram.py
+  agent.py          a space's agent: reads the space's past topics, plans the next one, runs the pipeline
   bot.py            Telegram bot: commands + daily schedule
 ```
 
@@ -52,10 +53,10 @@ You only need the key for the provider you use. Switching takes effect on the ne
 
 ## Database (Supabase)
 
-On a server, keep the app's data in **Supabase** so nothing is lost on restarts or redeploys. That covers the run history (which prevents repeated topics and headlines), the generated quizzes used by `/quiz`, and every admin-panel setting (channels, exams, schedules, editions and keys).
+On a server, keep the app's data in **Supabase** so nothing is lost on restarts or redeploys. That covers the run history (which prevents repeated topics and headlines), the generated quizzes used by `/quiz`, and every admin-panel setting (spaces, channels, custom exams, newspaper schedules, editions and keys).
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Create the tables: open **SQL Editor**, paste [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. Alternatively, set `SUPABASE_DB_URL` and run `python -m pathshala_bot db-init`.
+2. Create the tables: open **SQL Editor**, paste [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. Alternatively, set `SUPABASE_DB_URL` and run `python -m pathshala_bot db-init`. The script is safe to run again, and running it again after an update adds any new columns (for example `runs.space_id`, used to keep each space's topic history apart; until it's added, runs still save and the space history falls back to matching by exam).
 3. Add the credentials from **Project Settings → API Keys** to `.env`. Use a **Secret key** (`sb_secret_…`) or, on older projects, the legacy **service_role** key (`eyJ…`). Don't use the publishable or anon key.
    ```bash
    SUPABASE_URL=https://<project>.supabase.co
@@ -87,14 +88,39 @@ Then open http://localhost:8080. You'll get a login page: sign in as `admin` (or
 
 | Tab | What you configure |
 |---|---|
-| **Dashboard** | Upcoming runs, what's running now, recent runs with links to their PDFs and videos, and setup warnings (e.g. a missing API key) |
+| **Dashboard** | Upcoming runs, what's running now, recent runs (with their space) and links to their PDFs and videos, and setup warnings (e.g. a missing API key, a space with no channels) |
+| **Spaces** | Your spaces: the exams in each, the connected channels, what to create (shorts/reels, PDF notes, quiz questions, post + card + memory trick), content types, video styles, language, an optional focus note for the agent, how many past topics to avoid, and when it runs (**every X hours** from a start time, or **at set times** each day, on chosen days; or manual only). Each space has **Run now** and **Dry run** (generate without posting) buttons and shows its recent topics. |
 | **Channels** | Any number of Telegram channels, YouTube accounts and Instagram accounts. Each has its own credentials, an on/off switch and a **Test** button. |
-| **Exams** | Turn each target exam on or off. Set its **language** (any of the 22 Indian languages, English or Hinglish), how often it's picked, and which channels it posts to. You can also add custom exams with their own subjects and topics. |
-| **Schedules** | **Every X hours** (from a start time) or **at set times** each day, on chosen days of the week. Also: which exams (or, for the newspaper, which editions), which content types, which **outputs** (shorts/reels, PDF notes, quiz questions, post + card + memory trick), which video styles, which channels, and a language override. Each schedule has **Run now** and **Dry run** (generate without posting) buttons. |
-| **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels |
-| **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, and API keys. Keys are stored on the server and only ever shown masked. |
+| **Exams** | The exam catalogue the spaces pick from (built-in exams from `exams.yaml`, with their language and subjects, and which spaces use them). You can add custom exams with their own subjects and topics. |
+| **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels, and when the newspaper runs |
+| **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, how many runs may render at the same time, and API keys. Keys are stored on the server and only ever shown masked. |
 
-Settings are saved to Supabase (`app_config`) when it's configured, otherwise to `output/control.json` (readable only by the server's own user). On the first start they're seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. Sign-in uses a login page and a signed session cookie that lasts 7 days. The cookie is HttpOnly and SameSite=Lax, and it's marked Secure over HTTPS. Repeated wrong passwords are locked out for a while, and changing `ADMIN_PASSWORD` signs everyone out. Scripts can still call the API with `curl -u admin:<password>`. Put the panel behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
+Settings are saved to Supabase (`app_config`) when it's configured, otherwise to `output/control.json` (readable only by the server's own user). On the first start they're seeded from your `.env`, so existing setups carry over. Settings saved before spaces existed are converted automatically: each old content schedule becomes a space with the same exams, channels, outputs and timing, and exam weights are dropped. Schedules reload as soon as you save. Sign-in uses a login page and a signed session cookie that lasts 7 days. The cookie is HttpOnly and SameSite=Lax, and it's marked Secure over HTTPS. Repeated wrong passwords are locked out for a while, and changing `ADMIN_PASSWORD` signs everyone out. Scripts can still call the API with `curl -u admin:<password>`. Put the panel behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
+
+## Spaces
+
+A **space** is a group of one or more exams plus the channels it posts to. For example:
+
+- "Rajasthan Police": Rajasthan SI and REET → the Rajasthan Telegram channel and the Hindi YouTube channel
+- "Science": JEE Main and NEET → the science Telegram channel and Instagram
+
+Each space has its own **agent**, and spaces run independently of each other. A space can run on its own schedule, or only when you press **Run now** (or send `/generate <space>` to the bot). Each run of the agent:
+
+1. Reads the topics this space posted before (the last 40 by default, set per space). Runs from before spaces existed count too.
+2. Asks the AI to choose the next post: an exam, a subject, one specific topic and a format. The topic must be clearly different from the recent ones. The AI rotates subjects, keeps the space's exams balanced, and prefers topics that appear in several of the space's exams (the post is then written for all of them). An optional **focus** note steers it, e.g. "prefer Rajasthan GK".
+3. Checks the choice. If the topic is too close to a recent one, the AI is asked again. If the AI is unavailable, a rule-based pick is used instead: the exam served longest ago, a subject it hasn't covered recently, and an unused seed topic.
+4. Researches, writes and renders what the space is set to create, then posts it to the space's connected channels only.
+
+A space never overlaps itself: if a run is still going when the next one is due, that firing is skipped. Different spaces can run at the same time, up to **Runs at the same time** in Settings (2 by default, since rendering videos is CPU-heavy).
+
+From the command line:
+
+```bash
+python -m pathshala_bot spaces
+```
+```bash
+python -m pathshala_bot run --space rajasthan-si --dry-run
+```
 
 ## Daily current-affairs newspaper (Akhbar)
 
@@ -103,7 +129,7 @@ The newspaper is published **per edition**, not per exam. An edition is a **regi
 - **State editions** (any state or UT, e.g. *Rajasthan · हिन्दी*): one paper shared by **every** exam of that state, such as the state PSC, police (SI, constable), subordinate/staff boards (patwari, clerk…), teacher recruitment and the state board. Roughly 55% is that state's news (government decisions, schemes, budget, appointments, culture, geography, recruitment notices), 30% national and 15% international.
 - **Central edition** (*Central · हिन्दी / English*): national and international news for central exams: UPSC, SSC, banking, railways, defence, CTET and NTA.
 
-Manage editions in the panel's **Newspaper** tab. Each edition has a region, a language, its own Telegram channels and an on/off switch. The defaults are Rajasthan · Hindi, Central · Hindi and Central · English (off). A "Daily newspaper" schedule (in the Schedules tab, off by default) produces one paper per selected edition. Each run:
+Manage editions in the panel's **Newspaper** tab. Each edition has a region, a language, its own Telegram channels and an on/off switch. The defaults are Rajasthan · Hindi, Central · Hindi and Central · English (off). A newspaper schedule (lower down the same tab, off by default) produces one paper per selected edition. Each run:
 
 1. **Researches the day's news.** Claude searches the last 24–48 hours and **decides what matters** for that edition's readers. It prefers official sources (the state government and DIPR portals, the state PSC, PIB, RBI) and the leading papers of the region, and skips stories that edition used in the last week.
 2. **Writes the edition:** 8–12 articles, each with a headline, dateline, summary, body, key facts, an **exam angle** ("परीक्षा दृष्टि"), a related static GK fact and its sources. It adds one-liners, "did you know" facts and a 6–10 question quiz.
@@ -131,7 +157,7 @@ To use an edition saved in the panel, pass `--edition rajasthan-hi`. Admins can 
 
 ## Languages
 
-Every exam, schedule and newspaper edition can use any of the 22 languages of the Eighth Schedule, plus English and Hinglish. Each language gets its own script fonts (Noto for most scripts; Nastaliq for Urdu reading text), localized dates, and right-to-left layout for Urdu, Kashmiri and Sindhi.
+Every exam, space and newspaper edition can use any of the 22 languages of the Eighth Schedule, plus English and Hinglish. Each language gets its own script fonts (Noto for most scripts; Nastaliq for Urdu reading text), localized dates, and right-to-left layout for Urdu, Kashmiri and Sindhi.
 
 | Code | Language | Voice-over |
 |---|---|---|
@@ -260,12 +286,13 @@ python -m pathshala_bot exams
 |---|---|---|
 | `/exams`, `/types`, `/styles` | anyone | List the exams, formats and video styles |
 | `/quiz [exam]` | anyone | Sends a random quiz poll from past content (no AI cost) |
-| `/preview [exam] [type] [style]` | admin | Generates and sends everything to *your* chat only |
-| `/generate [exam] [type] [style]` | admin | Generates and publishes to the channel, YouTube and Instagram |
+| `/spaces` | admin | Lists the spaces and how many channels each is connected to |
+| `/preview [space] [exam] [type] [style]` | admin | Runs a space's agent and sends everything to *your* chat only |
+| `/generate [space] [exam] [type] [style]` | admin | Runs a space's agent and posts to the space's channels |
 | `/history` | admin | Lists the last runs |
 | `/akhbar [edition]` | admin | Builds today's newspaper for an edition (e.g. `rajasthan-hi`, `central-en`) and sends it to your chat |
 
-Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`.
+Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`. `[space]` is a space's ID or name. With only an exam, the first space containing that exam runs, limited to that exam. With nothing, the only space runs (if you have several, the bot asks which).
 
 ### Hosting options
 
@@ -328,7 +355,7 @@ The trick appears in the PDF with its breakdown table, and as its own Telegram m
 
 ## Adding an exam
 
-Add an entry to `pathshala_bot/exams.yaml` with an `id`, a `language` (a code from the [Languages](#languages) table, e.g. `hi`, `ta`, `bn`), a `weight` and its `subjects` with seed topics. You don't need to change any code.
+Add an entry to `pathshala_bot/exams.yaml` with an `id`, a `language` (a code from the [Languages](#languages) table, e.g. `hi`, `ta`, `bn`) and its `subjects` with seed topics, or add a custom exam in the panel's **Exams** tab. Then add it to a space. You don't need to change any code.
 
 ## Tests
 

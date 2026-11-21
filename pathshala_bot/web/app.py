@@ -1,4 +1,4 @@
-"""Admin panel: configure channels, exams, schedules and settings; watch runs.
+"""Admin panel: configure spaces, channels, exams, newspaper and settings; watch runs.
 
     python -m pathshala_bot serve            # UI + scheduler + Telegram bot in one process
 
@@ -134,7 +134,7 @@ def create_app(with_bot: bool = True) -> FastAPI:
         return {
             "config": control.public_view(cfg),
             "catalogue": control.catalogue_info(),
-            "exam_defs": {k: {"name": e.name, "short_name": e.short_name, "language": e.language,
+            "exam_defs": {k: {"name": e.name, "short_name": e.short_name, "language": e.language, "audience": e.audience,
                               "subjects": list(e.subjects), "custom": k in {c.id for c in cfg.custom_exams}} for k, e in defs.items()},
         }
 
@@ -167,6 +167,16 @@ def create_app(with_bot: bool = True) -> FastAPI:
                 "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")), "openai_key": bool(os.getenv("OPENAI_API_KEY")),
                 "provider": settings.llm_provider, "database": "supabase" if supabase_configured() else "sqlite",
                 "db_error": db_error}
+
+    @app.post("/api/spaces/{sid}/run", dependencies=guard)
+    async def run_space_now(sid: str, dry: bool = False):
+        cfg = control.load()
+        if cfg.space(sid) is None:
+            raise HTTPException(404, "No such space")
+        if not control.space_exams(cfg, cfg.space(sid)):
+            raise HTTPException(400, "This space has no exams")
+        sched.run_space_now(sid, dry_run=dry)
+        return {"started": True, "dry_run": dry}
 
     @app.post("/api/schedules/{sid}/run", dependencies=guard)
     async def run_now(sid: str, dry: bool = False):

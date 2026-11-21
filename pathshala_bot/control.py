@@ -55,14 +55,6 @@ class Channel(BaseModel):
         return bool(self.user_id and self.access_token)
 
 
-class ExamSetting(BaseModel):
-    exam_id: str
-    enabled: bool = True
-    language: Language | None = None  # None = exam's own default
-    weight: float = 1.0
-    channel_ids: list[str] = Field(default_factory=list)  # empty = all enabled channels
-
-
 class CustomExam(BaseModel):
     id: str
     name: str
@@ -105,23 +97,56 @@ class Outputs(BaseModel):
         return {k for k in OUTPUTS if getattr(self, k)}
 
 
-class Schedule(BaseModel):
-    id: str = Field(default_factory=_id)
-    name: str
-    enabled: bool = True
-    kind: Literal["content", "akhbar"] = "content"
+Day = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+ALL_DAYS: list = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+class Timing(BaseModel):
+    """When something runs: every X hours from a start time, or at set times each day."""
+
     mode: Literal["interval", "daily"] = "interval"
     every_hours: float = 6
     start_at: str = "07:00"  # anchor for interval schedules
     times: list[str] = Field(default_factory=lambda: ["08:00"])  # daily schedules
-    days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
-    exam_ids: list[str] = Field(default_factory=list)  # content schedules; empty = all enabled exams
-    edition_ids: list[str] = Field(default_factory=list)  # newspaper schedules; empty = all enabled editions
-    content_types: list[str] = Field(default_factory=list)  # empty = auto
-    video_styles: list[str] = Field(default_factory=list)  # empty = auto
+    days: list[Day] = Field(default_factory=lambda: list(ALL_DAYS))
+
+
+class SpaceSchedule(Timing):
+    enabled: bool = True
+
+
+class Space(BaseModel):
+    """A group of exams with its own channels, content settings and schedule.
+
+    Each space has its own agent: on every run it looks at what this space already
+    posted, picks a different topic from one of its exams, and posts to the space's channels.
+    """
+
+    id: str = Field(default_factory=_id)
+    name: str
+    enabled: bool = True
+    exam_ids: list[str] = Field(default_factory=list)
+    channel_ids: list[str] = Field(default_factory=list)  # empty = generate only, post nowhere
+    language: Language | None = None  # None = each exam's own language
+    focus: str = ""  # optional guidance for the agent, e.g. "only Rajasthan GK and current affairs"
     outputs: Outputs = Field(default_factory=Outputs)
-    channel_ids: list[str] = Field(default_factory=list)  # empty = the exam's channels
-    language: Language | None = None  # overrides the exam language
+    content_types: list[str] = Field(default_factory=list)  # empty = automatic
+    video_styles: list[str] = Field(default_factory=list)  # empty = automatic
+    memory: int = 40  # how many past topics of this space the agent avoids repeating
+    schedule: SpaceSchedule = Field(default_factory=SpaceSchedule)
+
+
+class Schedule(Timing):
+    """Daily newspaper schedule (content runs are scheduled per space)."""
+
+    id: str = Field(default_factory=_id)
+    name: str
+    enabled: bool = True
+    kind: Literal["akhbar"] = "akhbar"
+    edition_ids: list[str] = Field(default_factory=list)  # empty = all enabled editions
+    outputs: Outputs = Field(default_factory=Outputs)  # only .questions is used (quiz polls)
+    channel_ids: list[str] = Field(default_factory=list)  # empty = each edition's channels
+    language: Language | None = None  # overrides the edition language
 
 
 class General(BaseModel):
@@ -139,6 +164,7 @@ class General(BaseModel):
     akhbar_title_hi: str = "इंदिरा पाठशाला समसामयिकी पत्रिका"
     akhbar_title_en: str = "Indira Pathshala Samsamayiki Patrika"
     akhbar_articles: int = 10
+    max_parallel_runs: int = 2  # spaces run independently; at most this many render at the same time
     telegram_admin_ids: list[str] = Field(default_factory=list)
 
 
@@ -154,10 +180,13 @@ class ControlConfig(BaseModel):
     general: General = Field(default_factory=General)
     secrets: Secrets = Field(default_factory=Secrets)
     channels: list[Channel] = Field(default_factory=list)
-    exams: list[ExamSetting] = Field(default_factory=list)
+    spaces: list[Space] = Field(default_factory=list)
     custom_exams: list[CustomExam] = Field(default_factory=list)
-    schedules: list[Schedule] = Field(default_factory=list)
+    schedules: list[Schedule] = Field(default_factory=list)  # newspaper schedules
     editions: list[NewsEdition] = Field(default_factory=default_editions)
+
+    def space(self, sid: str) -> Space | None:
+        return next((s for s in self.spaces if s.id == sid), None)
 
     def edition(self, eid: str) -> NewsEdition | None:
         return next((e for e in self.editions if e.id == eid), None)
@@ -202,12 +231,37 @@ def _seed_from_env() -> ControlConfig:
                                     privacy=settings.youtube_privacy))  # type: ignore[arg-type]
     if settings.instagram_enabled:
         cfg.channels.append(Channel(name="Instagram", platform="instagram", user_id=settings.instagram_user_id, access_token=settings.instagram_access_token))
-    cfg.exams = [ExamSetting(exam_id=e.id, weight=e.weight) for e in load_catalogue().values()]
-    cfg.schedules = [
-        Schedule(name="Daily posts", mode="daily", times=list(settings.post_times)),
-        Schedule(name="Daily current affairs (Akhbar)", kind="akhbar", mode="daily", times=["07:00"], enabled=False),
-    ]
+    cfg.spaces = [Space(id="rajasthan-si", name="Rajasthan SI", exam_ids=["rajasthan-si"], channel_ids=[c.id for c in cfg.channels],
+                        schedule=SpaceSchedule(mode="daily", times=list(settings.post_times)))]
+    cfg.schedules = [Schedule(name="Daily current affairs (Akhbar)", mode="daily", times=["07:00"], enabled=False)]
     return cfg
+
+
+def migrate(raw: dict) -> dict:
+    """Settings saved before spaces existed: exam list + content schedules -> spaces (weights dropped)."""
+    if "spaces" in raw:
+        return raw
+    raw = dict(raw)
+    exams = raw.pop("exams", None) or []
+    enabled = [e["exam_id"] for e in exams if e.get("enabled", True)]
+    all_channels = [c["id"] for c in raw.get("channels", []) if c.get("enabled", True)]
+    spaces, keep = [], []
+    for s in raw.get("schedules", []):
+        if s.get("kind", "content") == "akhbar":
+            keep.append(s)
+            continue
+        exam_ids = s.get("exam_ids") or enabled
+        chans = s.get("channel_ids") or sorted({c for e in exams if e["exam_id"] in exam_ids for c in e.get("channel_ids", [])}) or all_channels
+        timing = {k: s[k] for k in ("mode", "every_hours", "start_at", "times", "days") if k in s}
+        spaces.append({"id": s.get("id") or _id(), "name": s.get("name") or "Space", "enabled": True, "exam_ids": exam_ids,
+                       "channel_ids": chans, "language": s.get("language"), "outputs": s.get("outputs") or {},
+                       "content_types": s.get("content_types", []), "video_styles": s.get("video_styles", []),
+                       "schedule": {**timing, "enabled": s.get("enabled", True)}})
+    if not spaces and enabled:
+        spaces.append({"id": "main", "name": "Main space", "exam_ids": enabled, "channel_ids": all_channels,
+                       "schedule": {"enabled": False}})
+    raw["spaces"], raw["schedules"] = spaces, keep
+    return raw
 
 
 def storage() -> str:
@@ -255,8 +309,9 @@ def load() -> ControlConfig:
     with _lock:
         raw, needs_import = _read_raw()
         if raw is not None:
-            cfg = ControlConfig.model_validate(raw)
-            if needs_import:
+            migrated = "spaces" not in raw
+            cfg = ControlConfig.model_validate(migrate(raw))
+            if needs_import or migrated:
                 _write_raw(cfg)
         else:
             cfg = _seed_from_env()
@@ -266,11 +321,6 @@ def load() -> ControlConfig:
             cfg.general.akhbar_title_hi = General().akhbar_title_hi
         if cfg.general.akhbar_title_en == "Pathshala Times":
             cfg.general.akhbar_title_en = General().akhbar_title_en
-        # exams added to the catalogue later show up automatically
-        known = {e.exam_id for e in cfg.exams}
-        for e in all_exam_defs(cfg).values():
-            if e.id not in known:
-                cfg.exams.append(ExamSetting(exam_id=e.id, weight=e.weight, enabled=False))
         return cfg
 
 
@@ -316,21 +366,27 @@ def apply(cfg: ControlConfig) -> None:
 def all_exam_defs(cfg: ControlConfig) -> dict[str, Exam]:
     exams = dict(load_catalogue())
     for c in cfg.custom_exams:
-        exams[c.id] = Exam(id=c.id, name=c.name, short_name=c.short_name, language=c.language, weight=1.0,
+        exams[c.id] = Exam(id=c.id, name=c.name, short_name=c.short_name, language=c.language,
                            audience=c.audience, subjects=c.subjects)
     return exams
 
 
-def effective_exams(cfg: ControlConfig, language: str | None = None) -> dict[str, Exam]:
-    """Enabled exams with UI overrides (language, weight) applied."""
+def space_exams(cfg: ControlConfig, space: Space) -> dict[str, Exam]:
+    """The space's exams, with the space's language applied (exams missing from the catalogue are skipped)."""
     defs = all_exam_defs(cfg)
-    out = {}
-    for es in cfg.exams:
-        e = defs.get(es.exam_id)
-        if e is None or not es.enabled:
-            continue
-        out[e.id] = replace(e, language=language or es.language or e.language, weight=es.weight)
-    return out
+    return {eid: (replace(defs[eid], language=space.language) if space.language else defs[eid])
+            for eid in space.exam_ids if eid in defs}
+
+
+def space_channels(cfg: ControlConfig, space: Space) -> list[Channel]:
+    """Channels connected to the space (enabled and configured ones only)."""
+    return [c for c in cfg.channels if c.id in space.channel_ids and c.enabled and c.configured()]
+
+
+def find_space(cfg: ControlConfig, key: str) -> Space | None:
+    """By id, or by name (case-insensitive, spaces/hyphens ignored) - for the bot and CLI."""
+    norm = lambda t: "".join(ch for ch in t.lower() if ch.isalnum())  # noqa: E731
+    return cfg.space(key) or next((s for s in cfg.spaces if norm(s.name) == norm(key)), None)
 
 
 def editions_for(cfg: ControlConfig, schedule: Schedule) -> list[NewsEdition]:
@@ -342,13 +398,6 @@ def channels_for_edition(cfg: ControlConfig, edition: NewsEdition, schedule: Sch
     """Telegram channels for a newspaper: schedule override > the edition's own channels > all."""
     ids = (schedule.channel_ids if schedule and schedule.channel_ids else None) or edition.channel_ids or None
     chans = [c for c in cfg.channels if c.enabled and c.configured() and c.platform == "telegram"]
-    return [c for c in chans if c.id in ids] if ids else chans
-
-
-def channels_for(cfg: ControlConfig, exam_id: str, schedule: Schedule | None = None) -> list[Channel]:
-    ids = (schedule.channel_ids if schedule and schedule.channel_ids else None) or next(
-        (es.channel_ids for es in cfg.exams if es.exam_id == exam_id and es.channel_ids), None)
-    chans = [c for c in cfg.channels if c.enabled and c.configured()]
     return [c for c in chans if c.id in ids] if ids else chans
 
 
@@ -408,24 +457,47 @@ def _validate(cfg: ControlConfig) -> None:
     hhmm = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     chan_ids = {c.id for c in cfg.channels}
     exam_ids = set(all_exam_defs(cfg))
+
+    def check_timing(where: str, t: Timing) -> None:
+        if t.mode == "interval" and not (0.25 <= t.every_hours <= 168):
+            raise ValueError(f"{where}: every_hours must be between 0.25 and 168")
+        for hm in ([t.start_at] if t.mode == "interval" else t.times):
+            if not hhmm.match(hm):
+                raise ValueError(f"{where}: time '{hm}' must be HH:MM (24h)")
+        if t.mode == "daily" and not t.times:
+            raise ValueError(f"{where}: add at least one time")
+
     for s in cfg.schedules:
-        if s.mode == "interval" and not (0.25 <= s.every_hours <= 168):
-            raise ValueError(f"Schedule '{s.name}': every_hours must be between 0.25 and 168")
-        for t in ([s.start_at] if s.mode == "interval" else s.times):
-            if not hhmm.match(t):
-                raise ValueError(f"Schedule '{s.name}': time '{t}' must be HH:MM (24h)")
-        if s.mode == "daily" and not s.times:
-            raise ValueError(f"Schedule '{s.name}': add at least one time")
-        bad = [x for x in s.content_types if x not in CONTENT_TYPES] + [x for x in s.video_styles if x not in VIDEO_STYLES]
-        bad += [x for x in s.channel_ids if x not in chan_ids] + [x for x in s.exam_ids if x not in exam_ids]
-        bad += [x for x in s.edition_ids if x not in {e.id for e in cfg.editions}]
+        check_timing(f"Schedule '{s.name}'", s)
+        bad = [x for x in s.channel_ids if x not in chan_ids] + [x for x in s.edition_ids if x not in {e.id for e in cfg.editions}]
         if bad:
             raise ValueError(f"Schedule '{s.name}': unknown values {bad}")
+    space_ids = set()
+    for sp in cfg.spaces:
+        where = f"Space '{sp.name}'"
+        if not sp.name.strip():
+            raise ValueError("Every space needs a name")
+        if not re.match(r"^[a-z0-9-]{2,40}$", sp.id):
+            raise ValueError(f"{where}: id '{sp.id}' must be 2-40 lowercase letters, digits and hyphens")
+        if sp.id in space_ids:
+            raise ValueError(f"Two spaces have the id '{sp.id}'")
+        space_ids.add(sp.id)
+        if not sp.exam_ids:
+            raise ValueError(f"{where}: add at least one exam")
+        check_timing(where, sp.schedule)
+        bad = [x for x in sp.content_types if x not in CONTENT_TYPES] + [x for x in sp.video_styles if x not in VIDEO_STYLES]
+        bad += [x for x in sp.channel_ids if x not in chan_ids] + [x for x in sp.exam_ids if x not in exam_ids]
+        if bad:
+            raise ValueError(f"{where}: unknown values {bad}")
+        if not 0 <= sp.memory <= 500:
+            raise ValueError(f"{where}: memory must be between 0 and 500 past topics")
+    if not 1 <= cfg.general.max_parallel_runs <= 8:
+        raise ValueError("Parallel runs must be between 1 and 8")
     from .akhbar import regions
     from .languages import is_known
 
     langs = [("default language", cfg.general.default_language)]
-    langs += [(f"exam {e.exam_id}", e.language) for e in cfg.exams if e.language]
+    langs += [(f"space {s.name}", s.language) for s in cfg.spaces if s.language]
     langs += [(f"schedule {s.name}", s.language) for s in cfg.schedules if s.language]
     langs += [(f"edition {e.region}", e.language) for e in cfg.editions]
     langs += [(f"custom exam {c.name}", c.language) for c in cfg.custom_exams]

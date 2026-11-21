@@ -51,6 +51,8 @@ class RunResult:
     errors: dict[str, str] = field(default_factory=dict)
     credits: list[str] = field(default_factory=list)
     video_style: str | None = None
+    space_id: str | None = None
+    plan_note: str = ""
 
     @property
     def ok(self) -> bool:
@@ -58,6 +60,10 @@ class RunResult:
 
     def summary(self) -> str:
         lines = [f"Run: {self.run_dir}", f"Exam: {self.exam.name}"]
+        if self.space_id:
+            lines.insert(1, f"Space: {self.space_id}")
+        if self.plan_note:
+            lines.append(f"Plan: {self.plan_note}")
         if self.package:
             lines += [f"Topic: {self.package.topic} ({self.package.content_type})", f"MCQs: {len(self.package.mcqs)}"]
             lines.append(f"Video style: {self.video_style or self.package.short.style}")
@@ -75,8 +81,7 @@ def _slug(text: str) -> str:
 
 
 def pick_exam(exams: dict[str, Exam], rng: random.Random) -> Exam:
-    pool = list(exams.values())
-    return rng.choices(pool, weights=[e.weight for e in pool])[0]
+    return rng.choice(list(exams.values()))
 
 
 def pick_type(exam: Exam, subject: str, rng: random.Random) -> str:
@@ -222,11 +227,17 @@ def run(
     exams: dict[str, Exam] | None = None,
     outputs: set[str] | None = None,
     channels: list | None = None,
+    seed_topic: str | None = None,
+    space_id: str | None = None,
+    avoid: list[str] | None = None,
+    plan_note: str = "",
 ) -> RunResult:
     """Run the full pipeline once.
 
     platforms/chat_id: legacy .env-based publishing; channels: admin-UI channels (takes precedence).
     outputs: subset of {"card", "questions", "pdf", "short"}; exams: pool to pick from (UI overrides applied).
+    seed_topic/space_id/avoid: set by a space's agent (agent.run_space): the chosen topic, the space the
+    run is recorded under, and the space's recent topics that research must not repeat.
     Nothing is published when neither platforms nor channels are given (dry run).
     """
     from . import llm
@@ -246,7 +257,8 @@ def run(
         if exam_id and exam_id not in exams:
             raise KeyError(f"Unknown exam '{exam_id}'. Known: {', '.join(exams)}")
         exam = exams[exam_id] if exam_id else pick_exam(exams, rng)
-        subject, seed_topic = exam.random_seed(rng, subject)
+        if not (seed_topic and subject in exam.subjects):  # else: chosen by the space's agent
+            subject, seed_topic = exam.random_seed(rng, subject)
         if content_type and content_type not in CONTENT_TYPES:
             raise KeyError(f"Unknown content type '{content_type}'. Known: {', '.join(CONTENT_TYPES)}")
         content_type = content_type or pick_type(exam, subject, rng)
@@ -259,12 +271,13 @@ def run(
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = settings.output_dir / f"{stamp}_{exam.id}_{content_type}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    result = RunResult(run_dir=run_dir, exam=exam)
+    result = RunResult(run_dir=run_dir, exam=exam, space_id=space_id, plan_note=plan_note)
     log.info("run %s: exam=%s subject=%s type=%s video=%s", run_dir.name, exam.id, subject, content_type, video_style or "from json")
 
     if pkg is None:
         try:
-            research = llm.research_topic(exam, subject, seed_topic, content_type, history.recent_topics(exam.id))
+            recent = avoid if avoid is not None else history.recent_topics(exam.id)
+            research = llm.research_topic(exam, subject, seed_topic, content_type, recent)
             (run_dir / "research.md").write_text(research.notes + "\n\nSOURCES\n" + "\n".join(f"- {s['title']}: {s['url']}" for s in research.sources), encoding="utf-8")
         except Exception:
             log.exception("research failed")
@@ -293,6 +306,8 @@ def run(
 def _finish(result: RunResult, history, subject: str, topic: str | None, content_type: str) -> None:
     manifest = {
         "exam": result.exam.id,
+        "space": result.space_id,
+        "plan": result.plan_note,
         "subject": subject,
         "topic": topic,
         "content_type": content_type,
@@ -305,4 +320,4 @@ def _finish(result: RunResult, history, subject: str, topic: str | None, content
     (result.run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     status = "ok" if result.ok and not [k for k in result.errors if not result.errors[k].startswith("skipped")] else ("partial" if result.ok else "failed")
     history.record(result.exam.id, subject, topic or "", content_type, str(result.run_dir), status, result.published,
-                   content=result.package.model_dump(mode="json") if result.package else None)
+                   content=result.package.model_dump(mode="json") if result.package else None, space_id=result.space_id)

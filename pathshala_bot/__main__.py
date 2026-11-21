@@ -1,5 +1,6 @@
 """CLI.
 
+  python -m pathshala_bot run --space rajasthan-si [--dry-run]   # one run of a space's agent
   python -m pathshala_bot run [--exam rajasthan-si] [--type pyq_quiz] [--publish telegram,youtube,instagram]
   python -m pathshala_bot run --from-json output/<run>/content.json --publish telegram   # re-render / re-post
   python -m pathshala_bot serve        # admin UI + scheduler + Telegram bot (set ADMIN_PASSWORD)
@@ -8,6 +9,7 @@
   python -m pathshala_bot db-check     # check the Supabase database (or local SQLite)
   python -m pathshala_bot bot          # bot only, legacy .env schedule
   python -m pathshala_bot exams        # list exams
+  python -m pathshala_bot spaces       # list spaces
 """
 
 from __future__ import annotations
@@ -30,7 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="run the content pipeline once")
-    r.add_argument("--exam", help="exam id from exams.yaml (default: weighted random)")
+    r.add_argument("--space", help="run this space's agent (id or name from the admin panel): picks a fresh topic, posts to the space's channels unless --dry-run")
+    r.add_argument("--dry-run", action="store_true", help="with --space: generate everything but post nothing")
+    r.add_argument("--exam", help="exam id from exams.yaml (default: random); with --space: limit the agent to this exam")
     r.add_argument("--type", choices=list(CONTENT_TYPES), help="content format (default: random)")
     r.add_argument("--subject", help="restrict to one subject of the exam")
     r.add_argument("--publish", default="", help="comma list: telegram,youtube,instagram or 'all'. Empty = dry run")
@@ -59,11 +63,22 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("bot", help="Telegram bot only, with the legacy POST_TIMES schedule")
     sub.add_parser("exams", help="list configured exams")
+    sub.add_parser("spaces", help="list spaces from the admin panel")
 
     a = ap.parse_args(argv)
     if a.cmd == "exams":
         for e in load_exams().values():
-            print(f"{e.id:16} {e.language:9} w={e.weight:<4} {e.name}  [{', '.join(e.subjects)}]")
+            print(f"{e.id:16} {e.language:9} {e.name}  [{', '.join(e.subjects)}]")
+        return 0
+    if a.cmd == "spaces":
+        from . import control
+
+        cfg = control.load()
+        for sp in cfg.spaces:
+            when = "manual only" if not sp.schedule.enabled else (f"every {sp.schedule.every_hours}h from {sp.schedule.start_at}"
+                                                                   if sp.schedule.mode == "interval" else "daily at " + ", ".join(sp.schedule.times))
+            print(f"{sp.id:16} {'on ' if sp.enabled else 'off'} {sp.name}: exams={','.join(sp.exam_ids)} "
+                  f"channels={len(control.space_channels(cfg, sp))} ({when})")
         return 0
     if a.cmd == "serve":
         import os
@@ -148,6 +163,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from . import pipeline
+
+    if a.space:
+        from . import agent, control
+
+        cfg = control.load()
+        control.apply(cfg)
+        space = control.find_space(cfg, a.space)
+        if space is None:
+            ap.error(f"unknown space '{a.space}'. Known: {', '.join(s.id for s in cfg.spaces)}")
+        result = agent.run_space(cfg, space, dry_run=a.dry_run, exam_id=a.exam, content_type=a.type, video_style=a.video_style)
+        print("\n" + result.summary())
+        return 0 if result.ok else 1
 
     platforms = set(pipeline.PLATFORMS) if a.publish == "all" else {p.strip() for p in a.publish.split(",") if p.strip()}
     unknown = platforms - set(pipeline.PLATFORMS)
@@ -237,7 +264,7 @@ def db_setup() -> int:
     cfg = control.load()  # creates the row from .env (or imports output/control.json) when missing
     print(f"  {'Already set up - kept your saved settings' if existed else 'Created settings from .env'}:")
     print(f"    AI provider: {cfg.general.llm_provider} | channels: {len(cfg.channels)} | "
-          f"exams enabled: {sum(e.enabled for e in cfg.exams)} | schedules: {len(cfg.schedules)} | newspaper editions: {len(cfg.editions)}")
+          f"spaces: {len(cfg.spaces)} | newspaper schedules: {len(cfg.schedules)} | newspaper editions: {len(cfg.editions)}")
     print("\nSupabase is ready. Open the admin panel (http://localhost:8080) - it should show 'DB: Supabase'.")
     return 0
 

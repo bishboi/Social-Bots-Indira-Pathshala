@@ -1,13 +1,14 @@
-"""Turns the schedules configured in the admin UI into APScheduler jobs.
+"""Turns spaces and newspaper schedules from the admin UI into APScheduler jobs.
 
-Runs are executed one at a time in a worker thread (rendering is CPU-heavy and
-posting order matters), queued if a previous run is still going.
+Every space runs independently: its own job, its own agent, its own history. A space
+never overlaps itself (a firing while it is still running is skipped), and at most
+`max_parallel_runs` runs (spaces + newspapers) render at the same time, since rendering
+video is CPU-heavy.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 import threading
 import traceback
 from datetime import datetime, timedelta
@@ -21,67 +22,86 @@ from . import control
 
 log = logging.getLogger(__name__)
 
-_worker_lock = threading.Lock()
-_state = {"running": None, "last": []}  # shown on the dashboard
+SPACE_JOB = "space:"  # job id prefix; newspaper jobs use the schedule id
+
+_state_lock = threading.Lock()
+_state: dict = {"running": {}, "last": []}  # shown on the dashboard
+_busy: dict[str, threading.Lock] = {}  # one lock per space / schedule
+_slots = {"n": 0, "sem": threading.BoundedSemaphore(2)}
 
 
-def _pick_exam(cfg: control.ControlConfig, sched: control.Schedule, rng: random.Random):
-    pool = control.effective_exams(cfg, sched.language)
-    if sched.exam_ids:
-        pool = {k: v for k, v in pool.items() if k in sched.exam_ids}
-    if not pool:
-        raise RuntimeError(f"Schedule '{sched.name}': no enabled exam to target")
-    exams = list(pool.values())
-    return rng.choices(exams, weights=[max(0.01, e.weight) for e in exams])[0], pool
+def _slot(cfg: control.ControlConfig) -> threading.BoundedSemaphore:
+    n = max(1, cfg.general.max_parallel_runs)
+    with _state_lock:
+        if _slots["n"] != n and not _state["running"]:
+            _slots["n"], _slots["sem"] = n, threading.BoundedSemaphore(n)
+        return _slots["sem"]
+
+
+def _run_guarded(key: str, label: str, cfg: control.ControlConfig, fn) -> str:
+    with _state_lock:
+        lock = _busy.setdefault(key, threading.Lock())
+    if not lock.acquire(blocking=False):
+        return f"{label}: still running from the last time - skipped"
+    try:
+        with _state_lock:
+            _state["running"][key] = {"name": label, "started": datetime.now().isoformat(timespec="seconds"), "state": "waiting"}
+        with _slot(cfg):
+            with _state_lock:
+                _state["running"][key]["state"] = "running"
+            try:
+                summary = fn()
+            except Exception as e:  # noqa: BLE001 - surfaced on the dashboard
+                log.exception("%s failed", label)
+                summary = f"FAILED: {e}\n{traceback.format_exc()[-800:]}"
+    finally:
+        with _state_lock:
+            _state["running"].pop(key, None)
+        lock.release()
+    with _state_lock:
+        _state["last"] = ([{"schedule": label, "finished": datetime.now().isoformat(timespec="seconds"), "summary": summary}] + _state["last"])[:30]
+    return summary
+
+
+def execute_space(space_id: str, dry_run: bool = False) -> str:
+    """One run of a space's agent (blocking). Returns a short summary."""
+    from . import agent
+
+    cfg = control.load()
+    control.apply(cfg)
+    space = cfg.space(space_id)
+    if space is None:
+        return f"space {space_id} no longer exists"
+    label = f"Space · {space.name}" + (" (dry run)" if dry_run else "")
+    return _run_guarded(SPACE_JOB + space.id, label, cfg, lambda: agent.run_space(cfg, space, dry_run=dry_run).summary())
 
 
 def execute(schedule_id: str, dry_run: bool = False) -> str:
-    """Run one firing of a schedule (blocking). Returns a short summary."""
+    """One firing of a newspaper schedule (blocking). Returns a short summary."""
     cfg = control.load()
     control.apply(cfg)
     sched = cfg.schedule(schedule_id)
     if sched is None:
         return f"schedule {schedule_id} no longer exists"
-    with _worker_lock:
-        _state["running"] = {"schedule": sched.name, "started": datetime.now().isoformat(timespec="seconds")}
-        try:
-            summary = _execute(cfg, sched, dry_run)
-        except Exception as e:  # noqa: BLE001 - surfaced on the dashboard
-            log.exception("schedule %s failed", sched.name)
-            summary = f"FAILED: {e}\n{traceback.format_exc()[-800:]}"
-        finally:
-            _state["running"] = None
-        _state["last"] = ([{"schedule": sched.name, "finished": datetime.now().isoformat(timespec="seconds"), "summary": summary}] + _state["last"])[:20]
-        return summary
+    label = sched.name + (" (dry run)" if dry_run else "")
+    return _run_guarded(sched.id, label, cfg, lambda: _execute_akhbar(cfg, sched, dry_run))
 
 
-def _execute(cfg: control.ControlConfig, sched: control.Schedule, dry_run: bool) -> str:
-    rng = random.Random()
-    if sched.kind == "akhbar":
-        from . import akhbar
+def _execute_akhbar(cfg: control.ControlConfig, sched: control.Schedule, dry_run: bool) -> str:
+    from . import akhbar
 
-        editions = control.editions_for(cfg, sched)
-        if not editions:
-            raise RuntimeError("no enabled newspaper edition for this schedule")
-        out = []
-        for ed in editions:
-            desk = akhbar.Desk(region=ed.region, language=sched.language or ed.language)
-            chans = [] if dry_run else control.channels_for_edition(cfg, ed, sched)
-            out.append(akhbar.run(desk, channels=chans, questions=sched.outputs.questions).summary())
-        return "\n\n".join(out)
-
-    from . import pipeline
-
-    exam, pool = _pick_exam(cfg, sched, rng)
-    ctype = rng.choice(sched.content_types) if sched.content_types else None
-    style = rng.choice(sched.video_styles) if sched.video_styles else None
-    chans = [] if dry_run else control.channels_for(cfg, exam.id, sched)
-    res = pipeline.run(exam_id=exam.id, content_type=ctype, video_style=style, exams=pool,
-                       outputs=sched.outputs.as_set(), channels=chans)
-    return res.summary()
+    editions = control.editions_for(cfg, sched)
+    if not editions:
+        raise RuntimeError("no enabled newspaper edition for this schedule")
+    out = []
+    for ed in editions:
+        desk = akhbar.Desk(region=ed.region, language=sched.language or ed.language)
+        chans = [] if dry_run else control.channels_for_edition(cfg, ed, sched)
+        out.append(akhbar.run(desk, channels=chans, questions=sched.outputs.questions).summary())
+    return "\n\n".join(out)
 
 
-def trigger_for(sched: control.Schedule, tz: str):
+def trigger_for(sched: control.Timing, tz: str):
     zone = ZoneInfo(tz)
     days = ",".join(sched.days) if len(sched.days) < 7 else "*"
     if sched.mode == "daily":
@@ -128,27 +148,47 @@ class Scheduler:
         control.apply(cfg)
         for job in self.aps.get_jobs():
             job.remove()
+        tz = cfg.general.timezone
+        for sp in cfg.spaces:
+            if sp.enabled and sp.schedule.enabled:
+                self.aps.add_job(self._fire_space, trigger_for(sp.schedule, tz), args=[sp.id], id=SPACE_JOB + sp.id,
+                                 name=f"Space · {sp.name}", replace_existing=True)
         for s in cfg.schedules:
-            if not s.enabled:
-                continue
-            self.aps.add_job(self._fire, trigger_for(s, cfg.general.timezone), args=[s.id], id=s.id, name=s.name, replace_existing=True)
+            if s.enabled:
+                self.aps.add_job(self._fire, trigger_for(s, tz), args=[s.id], id=s.id, name=s.name, replace_existing=True)
         log.info("scheduler loaded %d job(s)", len(self.aps.get_jobs()))
+
+    @staticmethod
+    def _today_allowed(timing: control.Timing, tz: str) -> bool:
+        if timing.mode != "interval" or len(timing.days) == 7:
+            return True  # daily schedules filter days in the cron trigger
+        return datetime.now(ZoneInfo(tz)).strftime("%a").lower() in timing.days
+
+    async def _fire_space(self, space_id: str):
+        import asyncio
+
+        cfg = control.load()
+        sp = cfg.space(space_id)
+        if sp and self._today_allowed(sp.schedule, cfg.general.timezone):
+            await asyncio.to_thread(execute_space, space_id)
 
     async def _fire(self, schedule_id: str):
         import asyncio
 
         cfg = control.load()
         s = cfg.schedule(schedule_id)
-        if s and s.mode == "interval" and len(s.days) < 7:
-            today = datetime.now(ZoneInfo(cfg.general.timezone)).strftime("%a").lower()
-            if today not in s.days:
-                return
-        await asyncio.to_thread(execute, schedule_id)
+        if s and self._today_allowed(s, cfg.general.timezone):
+            await asyncio.to_thread(execute, schedule_id)
 
     def run_now(self, schedule_id: str, dry_run: bool = False):
         import asyncio
 
         return asyncio.get_running_loop().create_task(asyncio.to_thread(execute, schedule_id, dry_run))
+
+    def run_space_now(self, space_id: str, dry_run: bool = False):
+        import asyncio
+
+        return asyncio.get_running_loop().create_task(asyncio.to_thread(execute_space, space_id, dry_run))
 
     def jobs(self) -> list[dict]:
         out = []
@@ -159,4 +199,5 @@ class Scheduler:
 
     @staticmethod
     def state() -> dict:
-        return {"running": _state["running"], "last": _state["last"]}
+        with _state_lock:
+            return {"running": list(_state["running"].values()), "last": list(_state["last"])}

@@ -17,6 +17,9 @@ create table if not exists public.runs (
   content       jsonb                      -- the generated package (quiz, notes, ...) – used by /quiz
 );
 create index if not exists runs_exam_created_idx on public.runs (exam_id, created_at desc);
+-- space the run belongs to (added later: also added to existing tables)
+alter table public.runs add column if not exists space_id text;
+create index if not exists runs_space_idx on public.runs (space_id, id desc);
 create index if not exists runs_type_idx on public.runs (content_type);
 
 -- Newspaper headlines already published (no repeats within a week)
