@@ -45,10 +45,10 @@
   .runhead img { height: 9mm; width: 9mm; vertical-align: middle; margin-right: 2mm; }
   .runhead span { vertical-align: middle; }
   /* fixed elements repeat on every page: the watermark */
-  .wm { position: fixed; top: 50%; left: 50%; width: 120mm; height: 120mm; margin: -60mm 0 0 -60mm; z-index: -1; text-align: center; }
-  .wm img { width: 120mm; height: 120mm; opacity: 0.06; }
-  .wm-text { position: fixed; top: 46%; left: -20mm; width: 220mm; text-align: center; transform: rotate(-35deg);
-             font: 700 40pt "PSans", sans-serif; letter-spacing: 4pt; color: #0e1630; opacity: 0.05; z-index: -1; }
+  .wm { position: fixed; top: 50%; left: 50%; width: 130mm; height: 128mm; margin: -64mm 0 0 -65mm; z-index: -1;
+        display: flex; flex-direction: column; align-items: center; opacity: 0.07; }
+  .wm img { width: 100mm; height: 100mm; display: block; }
+  .wm-text { margin-top: 8mm; font: 700 24pt "PSans", sans-serif; letter-spacing: 3pt; color: #0e1630; white-space: nowrap; line-height: 1; }
   .hero { display: flex; align-items: center; }
   .hero .logo { width: 24mm; height: 24mm; margin-right: 5mm; flex: none; background: #fff; border-radius: 50%; }
   .hero .text { flex: 1; }
@@ -59,8 +59,10 @@
 <body>
   <div class="runhead">{% if logo_url %}<img src="{{ logo_url }}">{% endif %}<span>{{ brand }}</span></div>
   {% if watermark %}
-  {% if logo_url %}<div class="wm"><img src="{{ logo_url }}"></div>{% endif %}
-  <div class="wm-text">{{ brand | upper }}</div>
+  <div class="wm">
+    {% if logo_url %}<img src="{{ logo_url }}">{% endif %}
+    <div class="wm-text">{{ brand | upper }}</div>
+  </div>
   {% endif %}
   <div class="hero">
     {% if logo_url %}<img class="logo" src="{{ logo_url }}">{% endif %}
