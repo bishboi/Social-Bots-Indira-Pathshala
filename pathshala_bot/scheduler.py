@@ -98,12 +98,25 @@ def trigger_for(sched: control.Schedule, tz: str):
 
 
 class Scheduler:
+    error: str | None = None
+
     def __init__(self):
         self.aps = AsyncIOScheduler(job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 1800})
 
     def start(self):
-        self.reload()
+        """Start even if the settings can't be loaded yet (the error is kept for the dashboard)."""
         self.aps.start()
+        self.try_reload()
+
+    def try_reload(self) -> bool:
+        try:
+            self.reload()
+            self.error = None
+            return True
+        except Exception as e:  # database unreachable, tables missing, invalid settings...
+            log.error("scheduler could not load settings: %s", e)
+            self.error = str(e)[:600]
+            return False
 
     def shutdown(self):
         if self.aps.running:

@@ -1,0 +1,14 @@
+# Secrets come in at runtime via --env-file, never baked into the image
+.env
+.env.*
+!.env.example
+# Local environments, generated files, VCS
+.venv/
+venv/
+output/
+data/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+media/

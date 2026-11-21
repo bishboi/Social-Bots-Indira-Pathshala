@@ -16,5 +16,7 @@ COPY . .
 ENV OUTPUT_DIR=/data/output DB_PATH=/data/output/history.sqlite3
 VOLUME ["/data"]
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status == 200 else 1)"
 # Admin UI + scheduler + Telegram bot. Requires ADMIN_PASSWORD; put it behind HTTPS if exposed publicly.
 CMD ["python", "-m", "pathshala_bot", "serve", "--host", "0.0.0.0", "--port", "8080"]

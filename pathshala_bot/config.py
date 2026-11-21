@@ -16,6 +16,33 @@ PROJECT_DIR = PACKAGE_DIR.parent
 load_dotenv(PROJECT_DIR / ".env")
 
 
+def _clean_env_values() -> None:
+    """Make values written like `KEY=value   # comment` or `KEY="value"` work everywhere.
+
+    python-dotenv already handles these in a .env file, but `docker run --env-file` passes
+    the whole line through literally, which silently breaks keys and settings. Applied to
+    the variables this app documents in .env.example (plus the provider SDK keys).
+    """
+    import re
+
+    names = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LLM_PROVIDER", "ADMIN_USER", "ADMIN_PASSWORD"}
+    example = PROJECT_DIR / ".env.example"
+    if example.exists():
+        names |= set(re.findall(r"^#?\s?([A-Z][A-Z0-9_]+)=", example.read_text(encoding="utf-8"), re.M))
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None:
+            continue
+        val = re.split(r"\s+#", raw, maxsplit=1)[0].strip()  # inline comment needs a space before '#'
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+            val = val[1:-1]
+        if val != raw:
+            os.environ[name] = val
+
+
+_clean_env_values()
+
+
 def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 

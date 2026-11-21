@@ -252,8 +252,30 @@ Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`.
 
 ### Hosting options
 
-- **Docker / VPS:** run `docker build -t pathshala .`, then `docker run --env-file .env -p 8080:8080 -v $PWD/data:/data pathshala`. This runs the admin panel, scheduler and bot; settings and history persist in `./data`.
+- **Docker / VPS:** run `docker build -t pathshala .`, then `docker run -d --name pathshala --restart unless-stopped --env-file .env -p 8080:8080 -v "$PWD/data:/data" pathshala`. This runs the admin panel, scheduler and bot, and keeps settings and history in `./data` (or in Supabase). Docker reports the container as *healthy* once the panel is up. This runs the admin panel, scheduler and bot; settings and history persist in `./data`.
 - **GitHub Actions:** `.github/workflows/post.yml` posts at 08:00 and 18:00 IST with no server, and the newspaper at 06:45 IST for the editions in the `AKHBAR_EDITIONS` repository variable (e.g. `Rajasthan:hi,central:hi,central:en`). This option has no admin panel: it uses the `.env` values. Add the `.env` values as repository secrets. You can also run it manually from the Actions tab and pick the exam, format and platforms.
+
+### Troubleshooting Docker
+
+The container doesn't stop when something is misconfigured. The panel still starts and shows the problem, so first open http://localhost:8080 and look at the dashboard. Then check the logs:
+
+```bash
+docker ps -a --filter name=pathshala
+```
+
+```bash
+docker logs pathshala
+```
+
+| Symptom | Fix |
+|---|---|
+| `The container name "/pathshala" is already in use` | Remove the old container first: `docker rm -f pathshala`, then `docker run …` again |
+| Panel says *ADMIN_PASSWORD is not set* | Add `ADMIN_PASSWORD=…` to `.env`, then recreate the container |
+| Dashboard shows *Cannot reach Supabase* or *does not exist* | Check `SUPABASE_URL`, run `supabase/schema.sql` in the SQL editor, use the **service_role** key, then `docker exec pathshala python -m pathshala_bot db-check` |
+| Changed `.env` but nothing changed | A container reads `.env` only when it's created: `docker rm -f pathshala`, then `docker run …` again |
+| Pulled new code | `docker build -t pathshala .`, then `docker rm -f pathshala` and `docker run …` again |
+
+Comments after values (`KEY=value  # note`) and quoted values (`KEY="value"`) in `.env` are handled for both Docker and local runs. `.env` is excluded from the image by `.dockerignore`.
 
 ## Credentials
 

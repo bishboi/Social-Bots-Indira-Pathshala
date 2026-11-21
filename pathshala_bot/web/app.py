@@ -34,7 +34,8 @@ def require_admin(creds: HTTPBasicCredentials = Depends(security)) -> str:
     user = os.getenv("ADMIN_USER", "admin")
     password = os.getenv("ADMIN_PASSWORD", "")
     if not password:
-        raise HTTPException(503, "Set ADMIN_PASSWORD to use the admin panel")
+        raise HTTPException(503, "ADMIN_PASSWORD is not set. Add ADMIN_PASSWORD=... to .env and restart the server "
+                                 "(with Docker: docker rm -f pathshala, then docker run ... again).")
     ok = secrets.compare_digest(creds.username.encode(), user.encode()) and secrets.compare_digest(creds.password.encode(), password.encode())
     if not ok:
         raise HTTPException(401, "Wrong username or password", headers={"WWW-Authenticate": "Basic"})
@@ -47,10 +48,20 @@ def create_app(with_bot: bool = True) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
+
         sched.start()
+
+        async def retry_until_loaded():  # e.g. Supabase tables created after the server started
+            while sched.error:
+                await asyncio.sleep(60)
+                sched.try_reload()
+
+        retry = asyncio.create_task(retry_until_loaded())
         if with_bot:
             state["bot"] = await _start_bot()
         yield
+        retry.cancel()
         if state["bot"] is not None:
             await _stop_bot(state["bot"])
         sched.shutdown()
@@ -59,13 +70,21 @@ def create_app(with_bot: bool = True) -> FastAPI:
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     guard = [Depends(require_admin)]
 
+    @app.get("/healthz")
+    def healthz():
+        """Unauthenticated liveness check (used by the Docker HEALTHCHECK). Reveals no settings."""
+        return {"ok": True, "settings_loaded": sched.error is None}
+
     @app.get("/", response_class=HTMLResponse, dependencies=guard)
     def index():
         return (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
     @app.get("/api/config", dependencies=guard)
     def get_config():
-        cfg = control.load()
+        try:
+            cfg = control.load()
+        except Exception as e:
+            raise HTTPException(500, f"Could not load settings: {e}") from e
         defs = control.all_exam_defs(cfg)
         return {
             "config": control.public_view(cfg),
@@ -99,6 +118,7 @@ def create_app(with_bot: bool = True) -> FastAPI:
             r["run"] = d.name
             r["files"] = sorted(p.name for p in d.glob("*") if p.suffix in (".pdf", ".mp4", ".png")) if d.is_dir() else []
         return {"jobs": sched.jobs(), "worker": sched.state(), "runs": runs, "bot": bool(state["bot"]),
+                "startup_error": sched.error,
                 "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")), "openai_key": bool(os.getenv("OPENAI_API_KEY")),
                 "provider": settings.llm_provider, "database": "supabase" if supabase_configured() else "sqlite",
                 "db_error": db_error}

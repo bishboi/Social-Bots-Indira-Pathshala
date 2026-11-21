@@ -32,6 +32,7 @@ class Supabase:
         key = key or settings.supabase_key
         if not (url and key):
             raise SupabaseError("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env")
+        self.url = url
         self.http = httpx.Client(
             base_url=f"{url}/rest/v1",
             headers={"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -54,23 +55,28 @@ class Supabase:
             raise SupabaseError(f"Supabase {r.request.method} {r.request.url.path} failed ({r.status_code}): {msg} {hint}".strip())
         return r
 
+    def _send(self, method: str, path: str, **kw) -> httpx.Response:
+        try:
+            return self._check(self.http.request(method, path, **kw))
+        except httpx.HTTPError as e:  # DNS / network / timeout
+            raise SupabaseError(f"Cannot reach Supabase at {self.url} ({e.__class__.__name__}: {e}). "
+                                "Check SUPABASE_URL (https://<project>.supabase.co) and the server's internet access.") from e
+
     def select(self, table: str, params: dict | None = None) -> list[dict]:
-        return self._check(self.http.get(f"/{table}", params=params or {})).json()
+        return self._send("GET", f"/{table}", params=params or {}).json()
 
     def count(self, table: str, params: dict | None = None) -> int:
-        r = self._check(self.http.get(f"/{table}", params={"select": "id", **(params or {})},
-                                      headers={"Prefer": "count=exact", "Range": "0-0"}))
+        r = self._send("GET", f"/{table}", params={"select": "id", **(params or {})},
+                       headers={"Prefer": "count=exact", "Range": "0-0"})
         total = r.headers.get("content-range", "*/0").split("/")[-1]
         return int(total) if total.isdigit() else len(r.json())
 
     def insert(self, table: str, rows: dict | list[dict]) -> list[dict]:
-        r = self.http.post(f"/{table}", json=rows, headers={"Prefer": "return=representation"})
-        return self._check(r).json()
+        return self._send("POST", f"/{table}", json=rows, headers={"Prefer": "return=representation"}).json()
 
     def upsert(self, table: str, row: dict, on_conflict: str = "id") -> list[dict]:
-        r = self.http.post(f"/{table}", json=row, params={"on_conflict": on_conflict},
-                           headers={"Prefer": "resolution=merge-duplicates,return=representation"})
-        return self._check(r).json()
+        return self._send("POST", f"/{table}", json=row, params={"on_conflict": on_conflict},
+                          headers={"Prefer": "resolution=merge-duplicates,return=representation"}).json()
 
     def check(self) -> dict[str, str]:
         """Status of each table: 'ok' or the error."""

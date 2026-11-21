@@ -289,3 +289,46 @@ def test_newspaper_renders_each_edition(ctl, tmp_path, region, lang, title):
     assert out.read_bytes()[:4] == b"%PDF"
     html = out.with_suffix(".html").read_text(encoding="utf-8")
     assert akhbar.Desk(region, lang).label() in html and "target-counter" in html
+
+
+def test_env_values_with_inline_comments_and_quotes(monkeypatch):
+    import os
+
+    from pathshala_bot import config
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai          # or: anthropic")
+    monkeypatch.setenv("ADMIN_PASSWORD", '"pa#ss word"')
+    monkeypatch.setenv("TELEGRAM_CHANNEL_ID", "'@chan'")
+    config._clean_env_values()
+    assert os.environ["LLM_PROVIDER"] == "openai"
+    assert os.environ["ADMIN_PASSWORD"] == "pa#ss word"  # '#' without a space before it is kept
+    assert os.environ["TELEGRAM_CHANNEL_ID"] == "@chan"
+
+
+def test_server_starts_without_password_or_database(ctl, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from pathshala_bot import supabase_db
+    from pathshala_bot.config import settings
+    from pathshala_bot.web.app import create_app
+
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    with TestClient(create_app(with_bot=False)) as client:
+        assert client.get("/healthz").json()["ok"] is True
+        r = client.get("/api/config", auth=("admin", "x"))
+        assert r.status_code == 503 and "ADMIN_PASSWORD" in r.json()["detail"]
+
+    # database unreachable: the panel still starts and reports the problem
+    monkeypatch.setenv("ADMIN_PASSWORD", "pw")
+    object.__setattr__(settings, "supabase_url", "https://unreachable.invalid")
+    object.__setattr__(settings, "supabase_key", "k")
+
+    def boom(*a, **k):
+        raise supabase_db.SupabaseError("Cannot reach Supabase at https://unreachable.invalid")
+
+    monkeypatch.setattr(supabase_db.Supabase, "select", boom)
+    with TestClient(create_app(with_bot=False)) as client:
+        assert client.get("/healthz").json() == {"ok": True, "settings_loaded": False}
+        st = client.get("/api/status", auth=("admin", "pw")).json()
+        assert "Cannot reach Supabase" in st["startup_error"] and "Cannot reach Supabase" in st["db_error"]
+        assert client.get("/api/config", auth=("admin", "pw")).status_code == 500

@@ -71,10 +71,16 @@ def main(argv: list[str] | None = None) -> int:
         from . import control
         from .web.app import create_app
 
-        control.apply(control.load())
+        # Never exit on setup problems: start the panel and show them there (and in the logs).
+        try:
+            control.apply(control.load())
+        except Exception as e:  # e.g. Supabase tables missing / wrong key - shown on the dashboard
+            logging.getLogger("pathshala").error("could not load settings at startup: %s", e)
         if not os.getenv("ADMIN_PASSWORD"):
-            print("Set ADMIN_PASSWORD (and optionally ADMIN_USER) to protect the admin panel.", file=sys.stderr)
-            return 2
+            logging.getLogger("pathshala").error(
+                "ADMIN_PASSWORD is not set - the panel will refuse logins until you add it to .env and restart.")
+        shown = "localhost" if a.host in ("0.0.0.0", "127.0.0.1") else a.host
+        print(f"\n  Admin panel: http://{shown}:{a.port}   (login: {os.getenv('ADMIN_USER', 'admin')} / ADMIN_PASSWORD)\n", flush=True)
         uvicorn.run(create_app(with_bot=not a.no_bot), host=a.host, port=a.port, log_level="info")
         return 0
     if a.cmd == "akhbar":
