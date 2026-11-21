@@ -104,9 +104,23 @@ def fit_text(draw, text, box_w, box_h, weight, language, start=96, minimum=34, s
         size -= 4
 
 
-def draw_lines(draw, lines, font, x, y, lh, fill, center=False, box_w=0):
+def _rtl(language: str) -> bool:
+    from ..languages import LANGUAGES
+
+    return bool(LANGUAGES.get(language) and LANGUAGES[language].rtl)
+
+
+def _label(language: str, kind: str) -> str:
+    from .. import i18n
+
+    return i18n.t(language, f"k_{kind}") if kind in KIND_LABEL else ""
+
+
+def draw_lines(draw, lines, font, x, y, lh, fill, center=False, box_w=0, rtl=False):
+    """Draw wrapped lines; right-aligned inside [x, x+box_w] for right-to-left scripts."""
     for line in lines:
-        lx = x + (box_w - draw.textlength(line, font=font)) / 2 if center else x
+        width = draw.textlength(line, font=font)
+        lx = x + (box_w - width) / 2 if center else (x + box_w - width if rtl and box_w else x)
         draw.text((lx, y), line, font=font, fill=fill)
         y += lh
     return y
@@ -123,6 +137,7 @@ def _chip(draw, xy, text, fill, fg, language, size=34):
 
 def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> Path:
     lang = exam.language
+    rtl = _rtl(lang)
     img = _gradient(W, H)
     d = ImageDraw.Draw(img)
     accent = ACCENTS.get(slide.kind, SAFFRON)
@@ -139,11 +154,13 @@ def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> P
         d.rounded_rectangle((60 + i * seg + 4, 190, 60 + (i + 1) * seg - 4, 198), radius=4, fill=accent if i <= idx else (80, 86, 120))
 
     # kind label + heading
-    label_font = font_for("A", 40, "bold", "en")
-    d.text((80, 330), KIND_LABEL.get(slide.kind, ""), font=label_font, fill=accent)
+    label = _label(lang, slide.kind)
+    label_font = font_for(label or "A", 40, "bold", lang)
+    lw = d.textlength(label, font=label_font)
+    d.text((W - 80 - lw if rtl else 80, 330), label, font=label_font, fill=accent)
     heading = clean(slide.heading)
     hfont, hlines, hlh = fit_text(d, heading, W - 160, 420, "heavy", lang, start=104, minimum=56, spacing=1.25)
-    y = draw_lines(d, hlines, hfont, 80, 400, hlh, WHITE)
+    y = draw_lines(d, hlines, hfont, 80, 400, hlh, WHITE, box_w=W - 160, rtl=rtl)
 
     # body card: sized to its text, centred in the space between heading and footer
     if slide.kind == "map" and slide.map:
@@ -154,7 +171,7 @@ def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> P
             m = Image.open(png).convert("RGB")
             img.paste(m, (60, int(y + 60)))
             out.parent.mkdir(parents=True, exist_ok=True)
-            _footer(d, accent)
+            _footer(d, accent, lang)
             img.save(out, "PNG", optimize=True)
             return out
         except Exception:
@@ -172,17 +189,19 @@ def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> P
     d = ImageDraw.Draw(img)
     d.rounded_rectangle(card, radius=40, outline=accent, width=4)
     by = card[1] + (card_h - len(blines) * blh) // 2
-    draw_lines(d, blines, bfont, card[0] + pad, by, blh, WHITE)
+    draw_lines(d, blines, bfont, card[0] + pad, by, blh, WHITE, box_w=card[2] - card[0] - 2 * pad, rtl=rtl)
 
-    _footer(d, accent)
+    _footer(d, accent, lang)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out, "PNG", optimize=True)
     return out
 
 
-def _footer(d, accent) -> None:
-    foot = f"Join Telegram  {settings.brand_handle}"
-    ffont = font_for(foot, 40, "bold", "en")
+def _footer(d, accent, language: str = "en") -> None:
+    from .. import i18n
+
+    foot = f"{i18n.t(language, 'join_telegram')}  {settings.brand_handle}"
+    ffont = font_for(foot, 40, "bold", language)
     fw = d.textlength(foot, font=ffont)
     d.rounded_rectangle(((W - fw) / 2 - 40, H - 220, (W + fw) / 2 + 40, H - 140), radius=40, fill=accent)
     d.text(((W - fw) / 2, H - 205), foot, font=ffont, fill=BG_TOP)
@@ -197,14 +216,15 @@ def render_card(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
     """Square-ish 4:5 card for the Telegram post / Instagram feed."""
     cw, ch = 1080, 1350
     lang = exam.language
+    rtl = _rtl(lang)
     img = _gradient(cw, ch)
     d = ImageDraw.Draw(img)
     _chip(d, (60, 60), clean(pkg.subject)[:28], (90, 200, 250), BG_TOP, lang)
 
     title = clean(pkg.title)
     tfont, tlines, tlh = fit_text(d, title, cw - 120, 300, "heavy", lang, start=84, minimum=48, spacing=1.25)
-    y = draw_lines(d, tlines, tfont, 60, 170, tlh, WHITE) + 30
-    d.line((60, y, 260, y), fill=SAFFRON, width=8)
+    y = draw_lines(d, tlines, tfont, 60, 170, tlh, WHITE, box_w=cw - 120, rtl=rtl) + 30
+    d.line((cw - 260, y, cw - 60, y) if rtl else (60, y, 260, y), fill=SAFFRON, width=8)
     y += 40
 
     points = [clean(p) for p in pkg.key_points[:6]]
@@ -219,8 +239,9 @@ def render_card(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
             break
         size -= 2
     for lines in wrapped:
-        d.ellipse((66, y + lh // 2 - 10, 86, y + lh // 2 + 10), fill=SAFFRON)
-        y = draw_lines(d, lines, f, 110, y, lh, WHITE) + 22
+        bx = cw - 86 if rtl else 66
+        d.ellipse((bx, y + lh // 2 - 10, bx + 20, y + lh // 2 + 10), fill=SAFFRON)
+        y = draw_lines(d, lines, f, 70 if rtl else 110, y, lh, WHITE, box_w=cw - 180, rtl=rtl) + 22
 
     foot_font = font_for("A", 36, "bold", "en")
     d.text((60, ch - 90), f"{settings.brand_name}  |  {settings.brand_handle}", font=foot_font, fill=MUTED)

@@ -23,6 +23,18 @@ UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 EDUCATION_CATEGORY = "27"
 
 
+def _audio_language(code: str) -> str:
+    """Language of the voice-over (a borrowed voice reads e.g. Sanskrit with Hindi)."""
+    from ..languages import LANGUAGES
+
+    lang = LANGUAGES.get(code)
+    if code == "hinglish":
+        return "hi"
+    if lang and lang.voice_fallback and not (lang.edge_voice or lang.eleven_model):
+        return lang.voice_fallback
+    return code
+
+
 def default_creds() -> dict:
     return {"client_id": settings.youtube_client_id, "client_secret": settings.youtube_client_secret,
             "refresh_token": settings.youtube_refresh_token, "privacy": privacy}
@@ -69,8 +81,8 @@ def publish(pkg: ContentPackage, exam: Exam, video: Path, credits: list[str] | N
             "description": description[:4900],
             "tags": [h for h in pkg.short.hashtags][:15] + [exam.short_name],
             "categoryId": EDUCATION_CATEGORY,
-            "defaultLanguage": "hi" if exam.language == "hi" else "en",
-            "defaultAudioLanguage": "hi" if exam.language in ("hi", "hinglish") else "en",
+            "defaultLanguage": {"hinglish": "hi"}.get(exam.language, exam.language),
+            "defaultAudioLanguage": _audio_language(exam.language),
         },
         "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False},
     }

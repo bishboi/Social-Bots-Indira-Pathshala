@@ -1,18 +1,17 @@
 <!doctype html>
-<html lang="{{ 'hi' if hi else 'en' }}">
+<html lang="{{ lang if lang != 'hinglish' else 'en' }}" dir="{{ 'rtl' if rtl else 'ltr' }}">
 <head>
 <meta charset="utf-8">
 <title>{{ title }} · {{ edition_label }} · {{ date_str }}</title>
 <meta name="author" content="{{ owner }}">
 <meta name="description" content="{{ title }} · {{ edition_label }} · {{ date_str }}">
-{%- macro L(h, e) -%}{{ h if hi else e }}{%- endmacro %}
-{%- macro sources(a) -%}<div class="src">{{ L('स्रोत', 'Source') }}: {% for s in a.sources %}{{ s.url | replace('https://', '') | replace('www.', '') }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{%- endmacro %}
+{%- macro sources(a) -%}<div class="src">{{ T['source'] }}: {% for s in a.sources %}{{ s.url | replace('https://', '') | replace('www.', '') }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{%- endmacro %}
 {%- macro facts(a) -%}
-  <div class="facts"><div class="facts-h">{{ L('मुख्य तथ्य', 'Key facts') }}</div><ul>{% for f in a.key_facts %}<li>{{ f }}</li>{% endfor %}</ul></div>
-  <div class="angle"><b>{{ L('परीक्षा दृष्टि', 'Exam angle') }}:</b> {{ a.exam_angle }}{% if a.static_link %}<div class="static"><b>{{ L('स्टैटिक जीके', 'Static GK') }}:</b> {{ a.static_link }}</div>{% endif %}</div>
+  <div class="facts"><div class="facts-h">{{ T['key_facts'] }}</div><ul>{% for f in a.key_facts %}<li>{{ f }}</li>{% endfor %}</ul></div>
+  <div class="angle"><b>{{ T['exam_angle'] }}:</b> {{ a.exam_angle }}{% if a.static_link %}<div class="static"><b>{{ T['static_gk'] }}:</b> {{ a.static_link }}</div>{% endif %}</div>
 {%- endmacro %}
 {%- macro photo(i, big=False) -%}
-  {% if photos.get(i) %}<figure class="{{ 'big' if big else '' }}"><img src="{{ photos[i].url }}"><figcaption>{{ L('फ़ोटो', 'Photo') }}: {{ photos[i].credit }}</figcaption></figure>{% endif %}
+  {% if photos.get(i) %}<figure class="{{ 'big' if big else '' }}"><img src="{{ photos[i].url }}"><figcaption>{{ T['photo'] }}: {{ photos[i].credit }}</figcaption></figure>{% endif %}
 {%- endmacro %}
 {%- macro story(i, a) -%}
   <article class="story" id="a{{ i }}">
@@ -22,7 +21,7 @@
       <div class="deck">{{ a.summary }}</div>
     </div>
     {{ photo(i) }}
-    <div class="byline">{{ L('पाठशाला डेस्क', 'Pathshala Desk') }} · <b>{{ a.dateline }}</b></div>
+    <div class="byline">{{ T['desk'] }} · <b>{{ a.dateline }}</b></div>
     {% for p in a.body %}<p>{{ p }}</p>{% endfor %}
     {{ facts(a) }}
     {{ sources(a) }}
@@ -42,16 +41,16 @@
     size: A4; margin: 15mm 10mm 13mm 10mm; background: #fbf8f1;
     @top-left { content: "{{ title }}  ·  {{ edition_label }}"; font: 700 8pt "Label", "HeadDeva"; color: #111; border-bottom: 1.2pt solid #111; vertical-align: bottom; padding-bottom: 1.5mm; }
     @top-center { content: "{{ date_str }}"; font: 8pt "Label", "HeadDeva"; color: #333; border-bottom: 1.2pt solid #111; vertical-align: bottom; padding-bottom: 1.5mm; }
-    @top-right { content: "{{ L('पृष्ठ', 'Page') }} " counter(page); font: 700 8pt "Label", "HeadDeva"; color: #111; border-bottom: 1.2pt solid #111; vertical-align: bottom; padding-bottom: 1.5mm; }
-    @bottom-left { content: "© {{ year }} {{ owner }}"; font: 7pt "Label", "HeadDeva"; color: #666; }
-    @bottom-right { content: "{{ handle }}"; font: 7pt "Label", "HeadDeva"; color: #666; }
+    @top-right { content: "{{ T['page'] }} " counter(page); font: 700 8pt "Label", "HeadDeva"; color: #111; border-bottom: 1.2pt solid #111; vertical-align: bottom; padding-bottom: 1.5mm; }
+    @bottom-left { content: "\2066© {{ year }} {{ owner }}\2069"; font: 7pt "Label", "HeadDeva"; color: #666; }
+    @bottom-right { content: "\2066{{ handle }}\2069"; font: 7pt "Label", "HeadDeva"; color: #666; }
   }
   @page :first { margin-top: 8mm; @top-left { content: none; border: 0; } @top-center { content: none; border: 0; } @top-right { content: none; border: 0; } }
 
   :root { --ink: #111; --muted: #4b4b4b; --red: #c0161d; --rule: #111; --hair: #b9b2a3; --tint: #efe9dc; }
   * { box-sizing: border-box; }
-  body { font-family: "Body", "HeadDeva", serif; color: var(--ink); font-size: {{ '8.7pt' if hi else '9pt' }}; line-height: {{ '1.55' if hi else '1.4' }}; orphans: 2; widows: 2; }
-  p { margin: 0 0 4px; text-align: justify; hyphens: auto; }
+  body { font-family: "Body", "HeadDeva", serif; color: var(--ink); font-size: {{ '8.7pt' if not latin else '9pt' }}; line-height: {{ '1.55' if not latin else '1.4' }}; orphans: 2; widows: 2; }
+  p { margin: 0 0 4px; text-align: {{ 'justify' if justify else 'start' }}; hyphens: auto; }
   a { color: inherit; text-decoration: none; }
 
   /* ---------------- masthead ---------------- */
@@ -62,10 +61,10 @@
   .ear b { color: var(--ink); font-size: 7.6pt; }
   .ear .big { font: 700 9pt "Label", "HeadDeva"; color: var(--red); }
   .title { flex: 1; text-align: center; padding: 0 2mm; color: #0b0b0b; }
-  .t-top { display: flex; align-items: center; gap: 2.5mm; justify-content: center; font: 700 {{ '11pt' if hi else '10pt' }}/1.1 "Label", "HeadDeva"; letter-spacing: {{ '1pt' if hi else '3pt' }};
+  .t-top { display: flex; align-items: center; gap: 2.5mm; justify-content: center; font: 700 {{ '11pt' if not latin else '10pt' }}/1.1 "Label", "HeadDeva"; letter-spacing: {{ '1pt' if not latin else '3pt' }};
            text-transform: uppercase; color: var(--red); margin-bottom: 0.5mm; }
   .t-top::before, .t-top::after { content: ""; flex: 1; border-top: 0.6pt solid var(--ink); border-bottom: 0.6pt solid var(--ink); height: 1.6pt; }
-  .t-main { white-space: nowrap; font: {{ ('37pt/1.1' if title_main|length <= 18 else '31pt/1.1') if hi else ('34pt/1.05' if title_main|length <= 20 else '28pt/1.05') }} "Mast", serif; }
+  .t-main { white-space: nowrap; font: {{ mast_pt }}pt/1.1 "Mast", serif; }
   .bar { display: flex; justify-content: space-between; align-items: center; border-top: 2.4pt solid var(--rule); border-bottom: 0.8pt solid var(--rule);
          padding: 1.2mm 0.5mm; font: 7.6pt "Label", "HeadDeva"; margin-top: 1mm; }
   .bar .ed { background: var(--red); color: #fff; font-weight: 700; padding: 0.4mm 2.5mm; }
@@ -74,7 +73,7 @@
   /* ---------------- shared story parts ---------------- */
   .kicker { font: 700 7pt "Label", "HeadDeva"; color: var(--red); letter-spacing: .5pt; text-transform: uppercase; }
   .head { break-inside: avoid; break-after: avoid; }
-  .deck { font: {{ '9.2pt/1.5' if hi else 'italic 9.6pt/1.35' }} "Body", "HeadDeva"; color: #2a2a2a; margin: 1mm 0 1.2mm; }
+  .deck { font: {{ '9.2pt/1.5' if not latin else 'italic 9.6pt/1.35' }} "Body", "HeadDeva"; color: #2a2a2a; margin: 1mm 0 1.2mm; }
   .byline { font: 7pt "Label", "HeadDeva"; color: var(--muted); text-transform: uppercase; letter-spacing: .3pt; border-top: 0.5pt solid var(--hair); border-bottom: 0.5pt solid var(--hair); padding: 0.6mm 0; margin: 1mm 0 1.6mm; }
   .byline b { color: var(--ink); }
   figure { margin: 0 0 2mm; break-inside: avoid; }
@@ -101,22 +100,22 @@
   .brief ol { margin: 0; padding-left: 4mm; font: 8pt/1.5 "Body", "HeadDeva"; }
   .brief li { margin-bottom: 1mm; padding-bottom: 1mm; border-bottom: 0.5pt solid var(--hair); }
   .lead .kicker { font-size: 8pt; }
-  .lead h1 { font: {{ '25pt/1.32' if hi else '28pt/1.08' }} "Head", "HeadDeva", serif; margin: 0.5mm 0 1.5mm; letter-spacing: {{ '0' if hi else '-0.3pt' }}; }
+  .lead h1 { font: {{ '25pt/1.32' if not latin else '28pt/1.08' }} "Head", "HeadDeva", serif; margin: 0.5mm 0 1.5mm; letter-spacing: {{ '0' if not latin else '-0.3pt' }}; }
   .lead .deck { font-size: 11pt; }
   .lead .cols { columns: 2; column-gap: 4.5mm; column-rule: 0.5pt solid var(--hair); }
   {# raised cap (a floated drop cap inside columns crashes WeasyPrint) #}
-  {% if not hi %}.lead .cols > p:first-of-type::first-letter { font: 22pt/1 "Head", "HeadDeva"; color: var(--red); }{% endif %}
+  {% if latin %}.lead .cols > p:first-of-type::first-letter { font: 22pt/1 "Head", "HeadDeva"; color: var(--red); }{% endif %}
   .dl { font-weight: 700; color: var(--red); }
   .front-rule { clear: both; border-top: 2.4pt solid var(--rule); border-bottom: 0.6pt solid var(--rule); height: 2.2pt; margin: 3mm 0 2.5mm; }
   .secondary { columns: 3; column-gap: 4.5mm; column-rule: 0.5pt solid var(--hair); }
   .story { margin-bottom: 3mm; padding-bottom: 2.5mm; border-bottom: 0.8pt solid var(--rule); }
-  .story h2 { font: {{ '12.4pt/1.38' if hi else '13.6pt/1.15' }} "Head", "HeadDeva", serif; margin: 0.4mm 0 0.8mm; }
-  .secondary .story:first-child h2 { font-size: {{ '14pt' if hi else '15.5pt' }}; }
+  .story h2 { font: {{ '12.4pt/1.38' if not latin else '13.6pt/1.15' }} "Head", "HeadDeva", serif; margin: 0.4mm 0 0.8mm; }
+  .secondary .story:first-child h2 { font-size: {{ '14pt' if not latin else '15.5pt' }}; }
 
   /* ---------------- inside sections ---------------- */
   .section { margin-top: 2mm; }
   .banner { display: flex; align-items: center; gap: 3mm; margin: 1mm 0 2.5mm; break-after: avoid; }
-  .banner span { font: {{ '15pt/1.25' if hi else '14pt/1.1' }} "Head", "HeadDeva"; background: var(--red); color: #fff; padding: 1.2mm 4mm 1.4mm; }
+  .banner span { font: {{ '15pt/1.25' if not latin else '14pt/1.1' }} "Head", "HeadDeva"; background: var(--red); color: #fff; padding: 1.2mm 4mm 1.4mm; }
   .banner::after { content: ""; flex: 1; border-top: 2.4pt solid var(--rule); border-bottom: 0.6pt solid var(--rule); height: 2.2pt; }
   .cols3 { columns: 3; column-gap: 4.5mm; column-rule: 0.5pt solid var(--hair); }
 
@@ -132,6 +131,17 @@
 
   .wm { position: fixed; top: 50%; left: 50%; width: 110mm; height: 110mm; margin: -55mm 0 0 -55mm; z-index: -1; opacity: 0.035; }
   .wm img { width: 110mm; height: 110mm; }
+  {% if rtl %}
+  .side { float: left; padding-left: 0; padding-right: 3mm; border-left: 0; border-right: 0.8pt solid var(--rule); }
+  .lead { float: right; }
+  .angle { border-left: 0; border-right: 2pt solid var(--red); padding: 0.4mm 2mm 0.4mm 0; }
+  ul, ol, .facts ul, .brief ol, .q ol { padding-left: 0 !important; padding-right: 4mm !important; }
+  .rights img { margin: 0; }
+  {% endif %}
+  {% if lang == 'ur' %}
+  body { line-height: 2.05; } .deck, .brief ol, .q { line-height: 1.95; }
+  .lead h1 { line-height: 1.75; } .story h2 { line-height: 1.7; } .t-main { line-height: 1.5; }
+  {% endif %}
 </style>
 </head>
 <body>
@@ -148,34 +158,34 @@
     <div class="t-main">{{ title_main }}</div>
   </div>
   <div class="ear right">
-    <span>{{ L('रोज़ सुबह टेलीग्राम पर', 'Every morning on Telegram') }}</span>
-    <span class="big">{{ handle }}</span>
-    <span>{{ L('पढ़ें · साझा करें', 'Read · Share') }}</span>
+    <span>{{ T['ear_morning'] }}</span>
+    <span class="big"><span dir="ltr">{{ handle }}</span></span>
+    <span>{{ T['ear_read'] }}</span>
   </div>
 </div>
 <div class="bar">
-  <span>{{ L('वर्ष', 'Vol.') }} {{ year }} · {{ L('अंक', 'Issue') }} {{ issue_no }}</span>
+  <span>{{ T['vol'] }} {{ year }} · {{ T['issue'] }} {{ issue_no }}</span>
   <span><b>{{ date_str }}</b></span>
   <span class="ed">{{ edition_label }}</span>
-  <span>{{ L('मूल्य: निःशुल्क', 'Price: Free') }}</span>
+  <span>{{ T['price_free'] }}</span>
 </div>
 <div class="tagline">{{ ed.tagline }}</div>
 
 <!-- ================= FRONT PAGE ================= -->
 {% set li, lead = front[0] %}
 <aside class="side">
-  <div class="box index"><h4>{{ L('इस अंक में', 'Inside') }}</h4><ul>
+  <div class="box index"><h4>{{ T['inside'] }}</h4><ul>
     {% for key, items in sections %}<li><a href="#s-{{ key }}">{{ section_label(key) }}</a></li>{% endfor %}
-    {% if ed.quiz %}<li><a href="#s-quiz">{{ L('प्रश्नोत्तरी', 'Quiz') }}</a></li>{% endif %}
+    {% if ed.quiz %}<li><a href="#s-quiz">{{ T['quiz'] }}</a></li>{% endif %}
   </ul></div>
   {% if ed.one_liners %}
-  <div class="box brief"><h4>{{ L('संक्षेप में', 'In brief') }}</h4><ol>{% for o in ed.one_liners[:6] %}<li>{{ o }}</li>{% endfor %}</ol></div>
+  <div class="box brief"><h4>{{ T['in_brief'] }}</h4><ol>{% for o in ed.one_liners[:6] %}<li>{{ o }}</li>{% endfor %}</ol></div>
   {% endif %}
   {% if ed.did_you_know %}
-  <div class="box brief dyk"><h4>{{ L('क्या आप जानते हैं?', 'Did you know?') }}</h4><ul style="margin:0;padding-left:4mm">{% for d in ed.did_you_know %}<li>{{ d }}</li>{% endfor %}</ul></div>
+  <div class="box brief dyk"><h4>{{ T['did_you_know'] }}</h4><ul style="margin:0;padding-left:4mm">{% for d in ed.did_you_know %}<li>{{ d }}</li>{% endfor %}</ul></div>
   {% endif %}
-  <div class="box"><h4>{{ L('परीक्षा दृष्टि', 'Exam angle') }}</h4><div class="angle" style="border:0;padding:0">{{ lead.exam_angle }}</div>
-    {% if lead.static_link %}<div class="angle" style="border:0;padding:0"><b>{{ L('स्टैटिक जीके', 'Static GK') }}:</b> {{ lead.static_link }}</div>{% endif %}</div>
+  <div class="box"><h4>{{ T['exam_angle'] }}</h4><div class="angle" style="border:0;padding:0">{{ lead.exam_angle }}</div>
+    {% if lead.static_link %}<div class="angle" style="border:0;padding:0"><b>{{ T['static_gk'] }}:</b> {{ lead.static_link }}</div>{% endif %}</div>
 </aside>
 
 <article class="lead" id="a{{ li }}">
@@ -183,10 +193,10 @@
   <h1>{{ lead.headline }}</h1>
   <div class="deck">{{ lead.summary }}</div>
   {{ photo(li, True) }}
-  <div class="byline">{{ L('पाठशाला डेस्क', 'Pathshala Desk') }} · <b>{{ lead.dateline }}</b></div>
+  <div class="byline">{{ T['desk'] }} · <b>{{ lead.dateline }}</b></div>
   <div class="cols">
-    {% for p in lead.body %}<p>{% if loop.first and hi %}<span class="dl">{{ lead.dateline }}। </span>{% endif %}{{ p }}</p>{% endfor %}
-    <div class="facts"><div class="facts-h">{{ L('मुख्य तथ्य', 'Key facts') }}</div><ul>{% for f in lead.key_facts %}<li>{{ f }}</li>{% endfor %}</ul></div>
+    {% for p in lead.body %}<p>{% if loop.first and not latin %}<span class="dl">{{ lead.dateline }}। </span>{% endif %}{{ p }}</p>{% endfor %}
+    <div class="facts"><div class="facts-h">{{ T['key_facts'] }}</div><ul>{% for f in lead.key_facts %}<li>{{ f }}</li>{% endfor %}</ul></div>
     {{ sources(lead) }}
   </div>
 </article>
@@ -209,7 +219,7 @@
 <!-- ================= BACK PAGE ================= -->
 <section class="puzzle" id="s-quiz">
   {% if ed.quiz %}
-  <div class="banner"><span>{{ L('आज की प्रश्नोत्तरी', "Today's Quiz") }}</span></div>
+  <div class="banner"><span>{{ T['todays_quiz'] }}</span></div>
   <div class="cols3">
     {% for q in ed.quiz %}
     <div class="q"><span class="n">{{ loop.index }}.</span> <b>{{ q.question }}</b><ol>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ol></div>
@@ -217,15 +227,15 @@
   </div>
   {% endif %}
   {% if ed.one_liners[6:] %}
-  <div class="banner" style="margin-top:3mm"><span>{{ L('एक नज़र में', 'At a glance') }}</span></div>
+  <div class="banner" style="margin-top:3mm"><span>{{ T['at_a_glance'] }}</span></div>
   <div class="cols3 brief"><ol start="7" style="margin:0">{% for o in ed.one_liners[6:] %}<li>{{ o }}</li>{% endfor %}</ol></div>
   {% endif %}
   {% if ed.quiz %}
-  <div class="answers"><b>{{ L('उत्तर', 'Answers') }}:</b> {% for q in ed.quiz %}{{ loop.index }}–{{ "ABCDEFGHIJ"[q.correct_index] }}{% if not loop.last %}&nbsp;&nbsp; {% endif %}{% endfor %}</div>
+  <div class="answers"><b>{{ T['answers_short'] }}:</b> {% for q in ed.quiz %}{{ loop.index }}–{{ "ABCDEFGHIJ"[q.correct_index] }}{% if not loop.last %}&nbsp;&nbsp; {% endif %}{% endfor %}</div>
   {% endif %}
   <div class="rights">
     {% if logo_url %}<img src="{{ logo_url }}">{% endif %}
-    <div><b>© {{ year }} {{ owner }}</b> ({{ handle }}). {{ L('सर्वाधिकार सुरक्षित। निःशुल्क व्यक्तिगत अध्ययन हेतु साझा कर सकते हैं; बेचना या बिना अनुमति पुनः प्रकाशित करना वर्जित है। समाचार सारांश प्रत्येक ख़बर के साथ दिए गए स्रोतों पर आधारित हैं; फ़ोटो विकिमीडिया कॉमन्स से, लाइसेंस सहित।', 'All rights reserved. Free to share for personal study; selling or republishing without permission is prohibited. News summaries are based on the sources listed with each story; photos from Wikimedia Commons under their stated licences.') }}</div>
+    <div><b>© {{ year }} {{ owner }}</b> ({{ handle }}). {{ T['akhbar_rights'] }}</div>
   </div>
 </section>
 </body>

@@ -7,7 +7,7 @@ An automated exam-prep content pipeline, a Telegram bot, an **admin panel** for 
 3. **Writes every asset in one structured call:** the Telegram post, 3–5 MCQs, a cheatsheet, a memory trick, the script for a 6–9 slide short and the PDF revision notes. The content comes out in Hindi, English or Hinglish, depending on the exam.
 4. **Renders**
    - `card.png`: a 1080×1350 topic card
-   - `short.mp4`: a 1080×1920 animated short made with **Manim**, voiced by ElevenLabs (or Edge TTS, or silent). It comes in one of several [video styles](#video-styles).
+   - `short.mp4`: a 1080×1920 animated short made with **Manim**, voiced by Gemini TTS (or the free Edge TTS, or silent). It comes in one of several [video styles](#video-styles).
    - `map.png`: an accurate static map whenever the topic has a map scene (it's also embedded in the PDF)
    - `notes.pdf`: A4 notes with a cheatsheet table, practice questions, an answer key and sources. Every page carries your logo in the header, a faint logo-and-name watermark, and a © copyright footer; a full copyright notice closes the notes. The logo is `assets/brand/logo.png`; replace it, or set `BRAND_LOGO`, `COPYRIGHT_OWNER` and `PDF_WATERMARK=false` in `.env`.
 5. **Publishes**
@@ -89,7 +89,7 @@ Then open http://localhost:8080. You'll get a login page: sign in as `admin` (or
 |---|---|
 | **Dashboard** | Upcoming runs, what's running now, recent runs with links to their PDFs and videos, and setup warnings (e.g. a missing API key) |
 | **Channels** | Any number of Telegram channels, YouTube accounts and Instagram accounts. Each has its own credentials, an on/off switch and a **Test** button. |
-| **Exams** | Turn each target exam on or off. Set its **language** (Hindi, English or Hinglish), how often it's picked, and which channels it posts to. You can also add custom exams with their own subjects and topics. |
+| **Exams** | Turn each target exam on or off. Set its **language** (any of the 22 Indian languages, English or Hinglish), how often it's picked, and which channels it posts to. You can also add custom exams with their own subjects and topics. |
 | **Schedules** | **Every X hours** (from a start time) or **at set times** each day, on chosen days of the week. Also: which exams (or, for the newspaper, which editions), which content types, which **outputs** (shorts/reels, PDF notes, quiz questions, post + card + memory trick), which video styles, which channels, and a language override. Each schedule has **Run now** and **Dry run** (generate without posting) buttons. |
 | **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels |
 | **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, and API keys. Keys are stored on the server and only ever shown masked. |
@@ -128,6 +128,22 @@ python -m pathshala_bot akhbar --region central --language en --chat @mychannel
 ```
 
 To use an edition saved in the panel, pass `--edition rajasthan-hi`. Admins can send `/akhbar rajasthan-hi` or `/akhbar central-en` to the bot to get a preview in their own chat.
+
+## Languages
+
+Every exam, schedule and newspaper edition can use any of the 22 languages of the Eighth Schedule, plus English and Hinglish. Each language gets its own script fonts (Noto for most scripts; Nastaliq for Urdu reading text), localized dates, and right-to-left layout for Urdu, Kashmiri and Sindhi.
+
+| Code | Language | Voice-over |
+|---|---|---|
+| `hi` `en` `bn` `gu` `kn` `ml` `mr` `ne` `ta` `te` `pa` `or` `as` `mai` `ks` `mni` `sat` | Hindi, English, Bengali, Gujarati, Kannada, Malayalam, Marathi, Nepali, Tamil, Telugu, Punjabi, Odia, Assamese, Maithili, Kashmiri, Manipuri, Santali | Gemini TTS Lite |
+| `sd` | Sindhi | Gemini TTS (Flash) |
+| `ur` | Urdu | Edge TTS (`ur-IN-GulNeural`) |
+| `sa` `doi` `brx` `kok` | Sanskrit, Dogri, Bodo, Konkani | Edge voice of a related language (Hindi or Marathi), as an approximation |
+| `hinglish` | Hinglish | Gemini TTS Lite |
+
+If Gemini fails (no key, quota), the voice-over falls back to Edge TTS automatically.
+
+**Labels** ("Key Points", "Quiz", section names, the newspaper title, and so on) exist in English and Hindi. For any other language they're translated once by the AI and cached in `output/cache/i18n/<code>.json`. To correct a translation, copy that file to `assets/i18n/<code>.json` and edit it. That file always takes priority.
 
 ## Video styles
 
@@ -288,7 +304,7 @@ Comments after values (`KEY=value  # note`) and quoted values (`KEY="value"`) in
 | Telegram | Create a bot with @BotFather → `TELEGRAM_BOT_TOKEN`. Add the bot as an **admin** of your channel → `TELEGRAM_CHANNEL_ID=@yourchannel`. An exam can post to its own channel through `telegram_chat` in `exams.yaml`. |
 | YouTube | In Google Cloud, enable YouTube Data API v3 and create an OAuth client (Desktop app). Then run `python scripts/youtube_auth.py` to get `YOUTUBE_REFRESH_TOKEN`. Until Google audits your API project, uploads are forced to *private*. |
 | Instagram | You need an Instagram **professional** account linked to a Facebook Page, and a Meta app with `instagram_basic` and `instagram_content_publish`. Put a long-lived token in `INSTAGRAM_ACCESS_TOKEN` and the IG user ID in `INSTAGRAM_USER_ID`. |
-| Voice | `ELEVENLABS_API_KEY` gives the best Hindi voice. Without it, the free Edge TTS (`hi-IN-SwaraNeural`) is used. |
+| Voice | `GEMINI_API_KEY` from aistudio.google.com/apikey uses Gemini TTS (`gemini-3.8-flash-lite-tts`). Without it, the free Edge TTS is used. ElevenLabs still works if you set `TTS_PROVIDER=elevenlabs`. |
 
 Any platform without credentials is skipped and noted in `manifest.json`, so you can start with Telegram only.
 
@@ -312,7 +328,7 @@ The trick appears in the PDF with its breakdown table, and as its own Telegram m
 
 ## Adding an exam
 
-Add an entry to `pathshala_bot/exams.yaml` with an `id`, a `language` (`hi`/`en`/`hinglish`), a `weight` and its `subjects` with seed topics. You don't need to change any code.
+Add an entry to `pathshala_bot/exams.yaml` with an `id`, a `language` (a code from the [Languages](#languages) table, e.g. `hi`, `ta`, `bn`), a `weight` and its `subjects` with seed topics. You don't need to change any code.
 
 ## Tests
 

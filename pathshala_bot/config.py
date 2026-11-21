@@ -105,8 +105,14 @@ class Settings:
     # being uploaded directly (use when you sync ./output to a CDN / bucket).
     media_public_base_url: str = field(default_factory=lambda: _env("MEDIA_PUBLIC_BASE_URL"))
 
-    # Text to speech
-    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "auto"))  # auto|elevenlabs|edge|none
+    # Text to speech: auto = Gemini, then Edge (free); elevenlabs only when chosen explicitly
+    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "auto"))  # auto|gemini|edge|elevenlabs|none
+    gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY") or _env("GOOGLE_API_KEY"))
+    gemini_tts_model: str = field(default_factory=lambda: _env("GEMINI_TTS_MODEL", "gemini-3.8-flash-lite-tts"))
+    gemini_tts_model_full: str = field(default_factory=lambda: _env("GEMINI_TTS_MODEL_FULL", "gemini-3.8-flash-tts"))
+    gemini_tts_voice: str = field(default_factory=lambda: _env("GEMINI_TTS_VOICE", "Kore"))
+    gemini_tts_style: str = field(default_factory=lambda: _env(
+        "GEMINI_TTS_STYLE", "a clear, warm and energetic teacher explaining to exam students, natural native pronunciation"))
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"))
     elevenlabs_model: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL", "eleven_multilingual_v2"))

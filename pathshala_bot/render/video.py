@@ -26,9 +26,6 @@ PAD = 0.45  # breathing room after each narration clip
 MIN_SCENE = 2.8
 SOFT_MAX = 60.0  # Shorts/Reels allow up to 3 min, but < 60s performs best
 
-LABELS_HI = {"bullets": "मुख्य बिंदु", "fact": "रोचक तथ्य", "quiz": "क्विज़ टाइम", "reveal": "सही उत्तर", "timeline": "समयरेखा",
-             "map": "मानचित्र पर", "formula": "सूत्र", "comparison": "तुलना", "image": "देखिए"}
-
 
 def _run(cmd: list[str], **kw) -> None:
     proc = subprocess.run(cmd, capture_output=True, text=True, **kw)
@@ -95,8 +92,34 @@ def fetch_media(pkg: ContentPackage, work_dir: Path, plan: list[dict]) -> list[s
     return credits
 
 
-def render_manim(pkg: ContentPackage, exam: Exam, plan: list[dict], work_dir: Path) -> Path:
+def font_family(path: Path) -> str:
+    """Family name Pango will use for a font file (typographic family if present)."""
+    from fontTools.ttLib import TTFont
+
+    names = TTFont(str(path), lazy=True)["name"]
+    for nid in (16, 1):
+        rec = names.getName(nid, 3, 1) or names.getName(nid, 1, 0)
+        if rec:
+            return str(rec)
+    return path.stem.split("-")[0]
+
+
+def _families(language: str) -> dict[str, str]:
+    from ..languages import LANGUAGES
     from . import fonts
+
+    lang = LANGUAGES[language]
+    out = {"latin": font_family(fonts.font_path("latin", "regular")), "deva": font_family(fonts.font_path("deva", "regular"))}
+    out[lang.script] = font_family(fonts.for_language(language, "regular"))
+    return out
+
+
+def render_manim(pkg: ContentPackage, exam: Exam, plan: list[dict], work_dir: Path) -> Path:
+    from .. import i18n
+    from ..languages import get as get_language
+    from . import fonts
+
+    lang = get_language(exam.language)
 
     spec = {
         "scenes": [sc.model_dump() for sc in pkg.short.scenes],
@@ -105,8 +128,12 @@ def render_manim(pkg: ContentPackage, exam: Exam, plan: list[dict], work_dir: Pa
         "exam": exam.short_name,
         "brand": settings.brand_name,
         "handle": settings.brand_handle,
-        "labels": LABELS_HI if exam.language == "hi" else {},
-        "font_files": sorted({str(fonts.font_path(s, w)) for s in ("deva", "latin") for w in ("regular", "medium", "semibold", "bold", "heavy")}),
+        "labels": {k: i18n.t(exam.language, f"k_{k}") for k in ("bullets", "fact", "quiz", "reveal", "timeline", "map", "formula", "comparison", "image")},
+        "join": i18n.t(exam.language, "join_telegram"),
+        "font_files": [str(p) for p in fonts.all_files_for(exam.language)],
+        "families": _families(exam.language),
+        "script": lang.script,
+        "rtl": lang.rtl,
         "latex": bool(shutil.which("latex") and shutil.which("dvisvgm")),
         "out_dir": str(work_dir),
         "fps": int(os.getenv("MANIM_FPS", FPS)),

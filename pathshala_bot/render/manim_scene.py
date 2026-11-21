@@ -54,16 +54,21 @@ def has_deva(s: str) -> bool:
 
 
 class Fonts:
-    deva = "Mukta"
-    latin = "Poppins"
+    """Font family per script; the content language's script wins, otherwise the text's own script."""
 
     def __init__(self, spec):
+        from ..languages import detect_script
+
         for p in spec["font_files"]:
             manimpango.register_font(p)
         self.lang = spec["language"]
+        self.families = spec.get("families") or {"latin": "Poppins", "deva": "Mukta"}
+        self.script = spec.get("script", "latin")
+        self._detect = detect_script
 
     def __call__(self, text: str) -> str:
-        return self.deva if (self.lang == "hi" or has_deva(text)) else self.latin
+        script = self.script if self.script != "latin" else self._detect(text)
+        return self.families.get(script) or self.families.get("latin", "Poppins")
 
 
 def wrap(text: str, font: str, size: float, max_w: float, weight=BOLD) -> list[str]:
@@ -85,6 +90,7 @@ class Short(Scene):
     def __init__(self, spec: dict, **kw):
         self.spec = spec
         self.F = Fonts(spec)
+        self.E = RIGHT if spec.get("rtl") else LEFT  # text edge: right for Urdu/Kashmiri/Sindhi
         super().__init__(**kw)
 
     # ---------- helpers ----------
@@ -92,7 +98,7 @@ class Short(Scene):
         font = self.F(s)
         lines = wrap(s, font, size, max_w, weight)
         group = VGroup(*[Text(l, font=font, font_size=size, color=color, weight=weight) for l in lines])
-        group.arrange(DOWN, buff=line_gap, aligned_edge=LEFT if align == "left" else ORIGIN)
+        group.arrange(DOWN, buff=line_gap, aligned_edge=self.E if align == "left" else ORIGIN)
         if group.width > max_w:
             group.scale_to_fit_width(max_w)
         return group
@@ -128,11 +134,11 @@ class Short(Scene):
         if not label:
             return VGroup()
         t = Text(label, font=self.F(label), font_size=30, color=accent, weight=BOLD)
-        return t.to_edge(LEFT, buff=0.55).set_y(TOP - 0.1)
+        return t.to_edge(self.E, buff=0.55).set_y(TOP - 0.1)
 
     def heading(self, text, accent, y=None, size=72):
         h = self.txt(text, size=size, max_w=8.0)
-        h.to_edge(LEFT, buff=0.55).set_y((y if y is not None else TOP - 0.75) - h.height / 2)
+        h.to_edge(self.E, buff=0.55).set_y((y if y is not None else TOP - 0.75) - h.height / 2)
         return h
 
     # ---------- chrome ----------
@@ -145,7 +151,8 @@ class Short(Scene):
         bot_band = Rectangle(width=9.2, height=1.7, stroke_width=0).set_fill(BG2, 1).move_to([0, -7.2, 0])
         # Header carries the brand only (no exam name).
         brand = Text(self.spec["brand"], font="Poppins", font_size=34, color=WHITE, weight=BOLD).move_to([0, 7.15, 0])
-        cta_t = Text(f"Join Telegram  {self.spec['handle']}", font="Poppins", font_size=30, color=BG1, weight=BOLD)
+        join = f"{self.spec.get('join', 'Join Telegram')}  {self.spec['handle']}"
+        cta_t = Text(join, font=self.F(join), font_size=30, color=BG1, weight=BOLD)
         cta = RoundedRectangle(corner_radius=0.3, width=cta_t.width + 0.7, height=0.62, stroke_width=0).set_fill(SAFFRON, 1)
         cta_t.move_to(cta)
         cta_g = VGroup(cta, cta_t).move_to([0, -7.0, 0])
@@ -176,11 +183,11 @@ class Short(Scene):
         items = VGroup()
         for b in s["bullets"][:5]:
             t = self.txt(b, size=56, weight="NORMAL", max_w=7.2)
-            dot = Dot(radius=0.11, color=accent).next_to(t[0], LEFT, buff=0.3)
+            dot = Dot(radius=0.11, color=accent).next_to(t[0], self.E, buff=0.3)
             items.add(VGroup(dot, t))
-        items.arrange(DOWN, buff=0.7, aligned_edge=LEFT).next_to(h, DOWN, buff=0.8).to_edge(LEFT, buff=0.95)
+        items.arrange(DOWN, buff=0.7, aligned_edge=self.E).next_to(h, DOWN, buff=0.8).to_edge(self.E, buff=0.95)
         if s["body"] and not items:
-            items = self.txt(s["body"], size=48, weight="NORMAL").next_to(h, DOWN, buff=0.8).to_edge(LEFT, buff=0.55)
+            items = self.txt(s["body"], size=48, weight="NORMAL").next_to(h, DOWN, buff=0.8).to_edge(self.E, buff=0.55)
         play(FadeIn(lab), FadeIn(h, shift=RIGHT * 0.3), rt=0.6)
         per = max(0.4, (left() * 0.75) / max(1, len(items)))
         for it in items:
@@ -212,7 +219,7 @@ class Short(Scene):
     def s_quiz(self, s, dur, accent):
         play, left, finish = self.clock(dur)
         lab = self.header_label("quiz", accent)
-        q = self.txt(s["body"] or s["heading"], size=62, max_w=8.0).to_edge(LEFT, buff=0.55)
+        q = self.txt(s["body"] or s["heading"], size=62, max_w=8.0).to_edge(self.E, buff=0.55)
         q.set_y(TOP - 0.7 - q.height / 2)
         opts = self._options(s, accent).next_to(q, DOWN, buff=0.6).set_x(0)
         room = opts.get_top()[1] - (BOTTOM + 2.2)
@@ -243,7 +250,7 @@ class Short(Scene):
             others = [o for i, o in enumerate(opts) if i != idx]
             play(right[0].animate.set_fill(GREEN, 0.35).set_stroke(GREEN, 5), *[o.animate.set_opacity(0.3) for o in others], rt=0.6)
             play(Indicate(right, color=GREEN, scale_factor=1.05), rt=0.6)
-        body = self.txt(s["body"], size=50, color=MUTED, weight="NORMAL", max_w=8.0).next_to(opts if len(opts) else h, DOWN, buff=0.6).to_edge(LEFT, buff=0.55) if s["body"] else VGroup()
+        body = self.txt(s["body"], size=50, color=MUTED, weight="NORMAL", max_w=8.0).next_to(opts if len(opts) else h, DOWN, buff=0.6).to_edge(self.E, buff=0.55) if s["body"] else VGroup()
         play(FadeIn(body, shift=UP * 0.2), rt=0.5)
         finish(VGroup(lab, h, opts, body))
 
@@ -295,7 +302,7 @@ class Short(Scene):
             sym = Text(tm["symbol"], font="Poppins", font_size=50, color=accent, weight=BOLD)
             mean = self.txt(tm["meaning"], size=46, weight="NORMAL", max_w=6.2)
             terms.add(VGroup(sym, mean.next_to(sym, RIGHT, buff=0.4)))
-        terms.arrange(DOWN, buff=0.38, aligned_edge=LEFT).next_to(fg, DOWN, buff=0.7).to_edge(LEFT, buff=0.75)
+        terms.arrange(DOWN, buff=0.38, aligned_edge=self.E).next_to(fg, DOWN, buff=0.7).to_edge(self.E, buff=0.75)
         play(FadeIn(lab), FadeIn(h), rt=0.5)
         play(Create(box), rt=0.4)
         from manim import Write
@@ -343,7 +350,7 @@ class Short(Scene):
         img.next_to(h, DOWN, buff=0.5)
         frame = Rectangle(width=img.width + 0.1, height=img.height + 0.1, stroke_color=accent, stroke_width=5).move_to(img)
         credit = Text(media["credit"][:90], font="Poppins", font_size=16, color=MUTED).next_to(frame, DOWN, buff=0.12).align_to(frame, LEFT)
-        body = self.txt(s["body"], size=38, weight="NORMAL", max_w=8.0).next_to(credit, DOWN, buff=0.35).to_edge(LEFT, buff=0.55) if s["body"] else VGroup()
+        body = self.txt(s["body"], size=38, weight="NORMAL", max_w=8.0).next_to(credit, DOWN, buff=0.35).to_edge(self.E, buff=0.55) if s["body"] else VGroup()
         play(FadeIn(lab), FadeIn(h), rt=0.5)
         play(FadeIn(img, scale=1.05), Create(frame), FadeIn(credit), rt=0.7)
         play(FadeIn(body, shift=UP * 0.2), img.animate.scale(1.04), frame.animate.scale(1.04), rt=min(2.5, max(0.3, left())))

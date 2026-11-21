@@ -11,3 +11,8 @@ SIL Open Font License 1.1 (https://openfontlicense.org). Re-download with `scrip
 | UnifrakturMaguntia | J. M. Peter Wiegel | English newspaper masthead (blackletter) |
 | Poppins | Indian Type Foundry | English-only slide and card text |
 | Noto Sans / Serif Devanagari | Google / Noto project | Fallbacks |
+| Noto Sans / Serif Bengali, Gujarati, Gurmukhi, Oriya, Tamil, Telugu, Kannada, Malayalam | Google / Noto project | Text, headlines and newspapers in those languages |
+| Noto Naskh Arabic | Google / Noto project | Urdu, Kashmiri, Sindhi slides and cards |
+| Noto Nastaliq Urdu | Google / Noto project | Urdu reading text and newspaper |
+| Noto Sans Ol Chiki | Google / Noto project | Santali |
+| Noto Sans Meetei Mayek | Google / Noto project | Manipuri |

@@ -100,7 +100,9 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
 
     m = pkg.mnemonic
     if m is not None and m.decode and "card" in include:
-        head = "🧠 <b>याद रखने की ट्रिक</b>" if exam.language == "hi" else "🧠 <b>Memory trick</b>"
+        from .. import i18n
+
+        head = f"🧠 <b>{safe_html(i18n.t(exam.language, 'memory_trick'))}</b>"
         lines = "\n".join(f"▫️ <b>{safe_html(c.cue)}</b> → {safe_html(c.stands_for)}" for c in m.decode)
         tip = f"\n\n💡 {safe_html(m.tip)}" if m.tip else ""
         result["messages"].append(tg.send_message(chat, f"{head}\n\n<b>“{safe_html(m.trick)}”</b>\n\n{lines}{tip}"[:4096])["message_id"])
@@ -110,7 +112,9 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
         time.sleep(1.2)
 
     if "pdf" in assets and "pdf" in include:
-        cap = f"📄 <b>{safe_html(pkg.title)}</b>\n{safe_html(pkg.subject)}\nFree PDF notes by {safe_html(settings.brand_name)}"
+        from .. import i18n
+
+        cap = f"📄 <b>{safe_html(pkg.title)}</b>\n{safe_html(pkg.subject)}\n{safe_html(i18n.t(exam.language, 'pdf_caption', brand=settings.brand_name))}"
         result["messages"].append(tg.send_document(chat, assets["pdf"], cap)["message_id"])
 
     if "video" in assets and "short" in include and send_video:

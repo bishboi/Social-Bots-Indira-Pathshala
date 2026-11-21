@@ -38,3 +38,22 @@ fetch "Mukta" Mukta 500 Medium
 fetch "Mukta" Mukta 600 SemiBold
 fetch "Mukta" Mukta 700 Bold
 fetch "Mukta" Mukta 800 ExtraBold
+
+# ---- Other Indian scripts (Noto, OFL) ------------------------------------------------
+# fetch_opt: like fetch, but skips weights a family doesn't have
+fetch_opt() { fetch "$@" 2>/dev/null || echo "  (skipped $2-$4)"; }
+for pair in "Bengali" "Gurmukhi" "Gujarati" "Oriya" "Tamil" "Telugu" "Kannada" "Malayalam"; do
+  fetch "Noto+Sans+$pair" "NotoSans$pair" 400 Regular
+  fetch "Noto+Sans+$pair" "NotoSans$pair" 700 Bold
+  fetch_opt "Noto+Sans+$pair" "NotoSans$pair" 800 ExtraBold
+  fetch "Noto+Serif+$pair" "NotoSerif$pair" 400 Regular
+  fetch "Noto+Serif+$pair" "NotoSerif$pair" 700 Bold
+done
+fetch "Noto+Nastaliq+Urdu" NotoNastaliqUrdu 400 Regular
+fetch "Noto+Nastaliq+Urdu" NotoNastaliqUrdu 700 Bold
+fetch "Noto+Naskh+Arabic" NotoNaskhArabic 400 Regular
+fetch "Noto+Naskh+Arabic" NotoNaskhArabic 700 Bold
+fetch "Noto+Sans+Ol+Chiki" NotoSansOlChiki 400 Regular
+fetch "Noto+Sans+Ol+Chiki" NotoSansOlChiki 700 Bold
+fetch "Noto+Sans+Meetei+Mayek" NotoSansMeeteiMayek 400 Regular
+fetch "Noto+Sans+Meetei+Mayek" NotoSansMeeteiMayek 700 Bold

@@ -21,11 +21,25 @@ log = logging.getLogger(__name__)
 from . import providers
 from .providers import ContentRefused, Research  # noqa: F401  (re-exported)
 
-LANG_RULES = {
-    "hi": "Write ALL learner-facing text in Hindi (Devanagari script). Keep standard technical terms, formulas, section numbers and proper nouns as commonly written in Hindi-medium exam material.",
-    "en": "Write all learner-facing text in clear Indian English.",
-    "hinglish": "Write in simple Hinglish (Hindi in Roman script mixed with English terms), the way popular Indian educators talk. Keep formulas and technical terms in English.",
-}
+def lang_rule(code: str | None) -> str:
+    """How the AI must write for a content language (all 22 scheduled languages + English/Hinglish)."""
+    from .languages import get
+
+    try:
+        return get(code).ai_rule()
+    except KeyError:
+        return get("en").ai_rule()
+
+
+class _LangRules(dict):  # backwards compatible: LANG_RULES.get(code, ...) still works
+    def get(self, code, default=None):  # noqa: D102
+        return lang_rule(code)
+
+    def __getitem__(self, code):
+        return lang_rule(code)
+
+
+LANG_RULES = _LangRules()
 
 
 MNEMONIC_RULES = """Memory tricks ("याद रखने की ट्रिक") - only when there is a list, sequence, set of dates/numbers or a confusing pair to memorise:
@@ -87,7 +101,7 @@ def generate_package(exam: Exam, subject: str, content_type: str, research: Rese
 Standards:
 - Accuracy first: use only facts supported by the research notes. If something is uncertain, leave it out.
 - Exam-oriented: match the level, style and vocabulary of {exam.name}.
-- {LANG_RULES.get(exam.language, LANG_RULES['en'])}
+- {lang_rule(exam.language)}
 - MCQs must have exactly 4 options and exactly one correct answer; distractors should be plausible. Vary the position of the correct option.
 - The short video is animated scene by scene. Each scene is on screen for 3-7 seconds: very few words on screen, the narration carries the explanation.
 - Map scenes: only name real places/districts/rivers with their official English names; coordinates and boundaries come from verified datasets, never from you. Only use map scenes when location genuinely matters.
@@ -153,7 +167,7 @@ def review_mnemonic(exam: Exam, pkg: ContentPackage) -> Mnemonic | None:
     facts = "\n".join([f"- {p}" for p in pkg.key_points] + [f"- {r.term}: {r.detail}" for r in pkg.cheatsheet])
     draft = pkg.mnemonic.model_dump_json(indent=1) if pkg.mnemonic else "(none - create one if the facts contain something worth memorising)"
     issues = mnemonic_issues(pkg.mnemonic)
-    prompt = f"""You review memory tricks for {exam.name} students. {LANG_RULES.get(exam.language, LANG_RULES['en'])}
+    prompt = f"""You review memory tricks for {exam.name} students. {lang_rule(exam.language)}
 
 TOPIC: {pkg.topic}
 FACTS (the only source of truth):

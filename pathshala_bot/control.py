@@ -20,10 +20,10 @@ from pydantic import BaseModel, Field
 from .config import Exam, PACKAGE_DIR, load_exams as load_catalogue, settings
 from .models import CONTENT_TYPES, VIDEO_STYLES
 
-Language = Literal["hi", "en", "hinglish"]
+Language = str  # any code in languages.LANGUAGES (validated on save)
 Platform = Literal["telegram", "youtube", "instagram"]
 OUTPUTS = ("card", "questions", "pdf", "short")  # what a content run produces / posts
-SECRET_FIELDS = {"anthropic_api_key", "openai_api_key", "telegram_bot_token", "elevenlabs_api_key", "client_secret", "refresh_token", "access_token"}
+SECRET_FIELDS = {"anthropic_api_key", "openai_api_key", "gemini_api_key", "telegram_bot_token", "elevenlabs_api_key", "client_secret", "refresh_token", "access_token"}
 
 
 def _id() -> str:
@@ -133,7 +133,7 @@ class General(BaseModel):
     copyright_owner: str = ""
     timezone: str = "Asia/Kolkata"
     default_language: Language = "hi"
-    tts_provider: Literal["auto", "elevenlabs", "edge", "none"] = "auto"
+    tts_provider: Literal["auto", "gemini", "edge", "elevenlabs", "none"] = "auto"
     mnemonic_review: bool = True
     pdf_watermark: bool = True
     akhbar_title_hi: str = "इंदिरा पाठशाला समसामयिकी पत्रिका"
@@ -145,6 +145,7 @@ class General(BaseModel):
 class Secrets(BaseModel):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    gemini_api_key: str = ""
     telegram_bot_token: str = ""
     elevenlabs_api_key: str = ""
 
@@ -189,6 +190,7 @@ def _seed_from_env() -> ControlConfig:
     cfg.secrets = Secrets(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        gemini_api_key=settings.gemini_api_key,
         telegram_bot_token=settings.telegram_bot_token,
         elevenlabs_api_key=settings.elevenlabs_api_key,
     )
@@ -294,6 +296,8 @@ def apply(cfg: ControlConfig) -> None:
         object.__setattr__(settings, "telegram_bot_token", s.telegram_bot_token)
     if s.elevenlabs_api_key:
         object.__setattr__(settings, "elevenlabs_api_key", s.elevenlabs_api_key)
+    if s.gemini_api_key:
+        object.__setattr__(settings, "gemini_api_key", s.gemini_api_key)
     from . import providers
 
     changed = False
@@ -418,7 +422,16 @@ def _validate(cfg: ControlConfig) -> None:
         if bad:
             raise ValueError(f"Schedule '{s.name}': unknown values {bad}")
     from .akhbar import regions
+    from .languages import is_known
 
+    langs = [("default language", cfg.general.default_language)]
+    langs += [(f"exam {e.exam_id}", e.language) for e in cfg.exams if e.language]
+    langs += [(f"schedule {s.name}", s.language) for s in cfg.schedules if s.language]
+    langs += [(f"edition {e.region}", e.language) for e in cfg.editions]
+    langs += [(f"custom exam {c.name}", c.language) for c in cfg.custom_exams]
+    bad_lang = [f"{where}: '{code}'" for where, code in langs if not is_known(code)]
+    if bad_lang:
+        raise ValueError("Unknown language " + ", ".join(bad_lang))
     known_regions = set(regions())
     seen = set()
     for ed in cfg.editions:
@@ -441,10 +454,16 @@ def catalogue_info() -> dict:
         "content_types": CONTENT_TYPES,
         "video_styles": VIDEO_STYLES,
         "outputs": list(OUTPUTS),
-        "languages": {"hi": "हिन्दी", "en": "English", "hinglish": "Hinglish"},
+        "languages": _language_choices(),
         "regions": _region_choices(),
         "exams_yaml": str(PACKAGE_DIR / "exams.yaml"),
     }
+
+
+def _language_choices() -> dict[str, str]:
+    from .languages import choices
+
+    return choices()
 
 
 def _region_choices() -> list[dict]:

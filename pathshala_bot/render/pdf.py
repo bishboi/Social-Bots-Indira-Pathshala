@@ -11,30 +11,29 @@ from ..config import PACKAGE_DIR, Exam, settings
 from ..models import ContentPackage
 from . import fonts
 
-LABELS = {
-    "hi": dict(key_points="मुख्य बिंदु", mnemonic="याद रखने की ट्रिक", cheatsheet="चीट शीट", term="विषय", detail="तथ्य",
-               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत", map="मानचित्र", cue="संकेत", stands_for="किसके लिए", tip="कैसे काम आएगी",
-               rights="सर्वाधिकार सुरक्षित। इस PDF को बेचना, बदलना या बिना अनुमति के दोबारा प्रकाशित करना वर्जित है। निःशुल्क व्यक्तिगत अध्ययन हेतु साझा कर सकते हैं।"),
-    "en": dict(key_points="Key Points", mnemonic="Memory Trick", cheatsheet="Cheatsheet", term="Term", detail="Fact",
-               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources", map="Map", cue="Cue", stands_for="Stands for", tip="How to use it",
-               rights="All rights reserved. Selling, altering or republishing this PDF without permission is prohibited. You may share it free of charge for personal study."),
-}
-
 _env = Environment(loader=FileSystemLoader(PACKAGE_DIR / "templates"), autoescape=select_autoescape(["html"]))
 
 
 def render_pdf(pkg: ContentPackage, exam: Exam, out: Path, map_png: Path | None = None) -> Path:
     from weasyprint import HTML  # imported lazily: needs system Pango
 
-    script = "deva" if exam.language == "hi" or fonts.has_devanagari(pkg.title + pkg.topic) else "latin"
+    from .. import i18n
+    from ..languages import get as get_language
+
+    lang = get_language(exam.language)
+    # Notes are set in the language's sans face (Urdu: Nastaliq, the usual reading style); Devanagari and Latin
+    # faces are added as fallbacks for mixed text such as English terms or Hindi place names.
+    body = "serif" if lang.code == "ur" else "regular"
     faces = [
-        {"family": "PSans", "url": fonts.font_path(script, "regular").as_uri(), "weight": 400},
-        {"family": "PSans", "url": fonts.font_path(script, "bold").as_uri(), "weight": 700},
+        {"family": "PSans", "url": fonts.for_language(lang.code, body).as_uri(), "weight": 400},
+        {"family": "PSans", "url": fonts.for_language(lang.code, "serif_bold" if lang.code == "ur" else "bold").as_uri(), "weight": 700},
+        {"family": "PDeva", "url": fonts.font_path("deva", "regular").as_uri(), "weight": 400},
+        {"family": "PLatin", "url": fonts.font_path("latin", "regular").as_uri(), "weight": 400},
     ]
     html = _env.get_template("notes.html").render(
         pkg=pkg, exam=exam, brand=settings.brand_name, handle=settings.brand_handle,
-        lang=exam.language if exam.language != "hinglish" else "en",
-        t=LABELS["hi" if exam.language == "hi" else "en"], font_faces=faces,
+        lang=lang.code if lang.code != "hinglish" else "en", rtl=lang.rtl,
+        t=i18n.labels(lang.code), font_faces=faces,
         map_url=map_png.resolve().as_uri() if map_png else None,
         logo_url=settings.brand_logo.resolve().as_uri() if settings.brand_logo.exists() else None,
         watermark=settings.pdf_watermark,

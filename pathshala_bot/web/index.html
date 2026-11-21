@@ -298,7 +298,7 @@
     <div class="card"><h3>Language, time &amp; voice</h3><div class="grid">
       <div><label>Default language</label><select x-model="cfg.general.default_language" @change="touch()"><template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="cfg.general.default_language===k"></option></template></select></div>
       <div><label>Timezone</label><input x-model="cfg.general.timezone" @input="touch()" placeholder="Asia/Kolkata"></div>
-      <div><label>Voice-over</label><select x-model="cfg.general.tts_provider" @change="touch()"><option value="auto">Auto (ElevenLabs → Edge)</option><option value="elevenlabs">ElevenLabs</option><option value="edge">Edge TTS (free)</option><option value="none">No voice</option></select></div>
+      <div><label>Voice-over</label><select x-model="cfg.general.tts_provider" @change="touch()"><option value="auto">Auto (Gemini TTS → Edge)</option><option value="gemini">Gemini TTS</option><option value="edge">Edge TTS (free)</option><option value="elevenlabs">ElevenLabs</option><option value="none">No voice</option></select></div>
       <div><label>&nbsp;</label><label class="toggle"><input type="checkbox" x-model="cfg.general.mnemonic_review" @change="touch()"> review memory tricks (extra AI call)</label></div>
     </div></div>
     <div class="card"><h3>Daily newspaper</h3><div class="grid">
@@ -310,7 +310,8 @@
       <div><label>Anthropic API key</label><input type="password" x-model="cfg.secrets.anthropic_api_key" @input="touch()" placeholder="not set"></div>
       <div><label>OpenAI API key</label><input type="password" x-model="cfg.secrets.openai_api_key" @input="touch()" placeholder="not set"></div>
       <div><label>Telegram bot token</label><input type="password" x-model="cfg.secrets.telegram_bot_token" @input="touch()" placeholder="not set"></div>
-      <div><label>ElevenLabs API key</label><input type="password" x-model="cfg.secrets.elevenlabs_api_key" @input="touch()" placeholder="not set"></div>
+      <div><label>Gemini API key (voice-over)</label><input type="password" x-model="cfg.secrets.gemini_api_key" @input="touch()" placeholder="not set"></div>
+      <div><label>ElevenLabs API key (optional)</label><input type="password" x-model="cfg.secrets.elevenlabs_api_key" @input="touch()" placeholder="not set"></div>
       <div><label>Bot admin user IDs (comma separated)</label><input :value="cfg.general.telegram_admin_ids.join(', ')" @change="cfg.general.telegram_admin_ids = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div>
     </div><p class="muted">Keys are stored on the server and shown masked; leave a field as is to keep the saved value. A new bot token takes effect after restarting the server.</p></div>
   </section>

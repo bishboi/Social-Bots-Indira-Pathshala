@@ -97,9 +97,11 @@ class Desk:
         return self.region == CENTRAL
 
     def label(self) -> str:
-        if self.language == "hi":
-            return "राष्ट्रीय संस्करण" if self.central else f"{STATE_HI.get(self.region, self.region)} संस्करण"
-        return "National edition" if self.central else f"{self.region} edition"
+        from . import i18n
+
+        if self.central:
+            return i18n.t(self.language, "national_edition")
+        return i18n.t(self.language, "edition", region=i18n.region_name(self.language, self.region))
 
 
 def desk_brief(desk: Desk) -> str:
@@ -163,6 +165,12 @@ def layout(articles: list) -> tuple[list[tuple[int, object]], list[tuple[str, li
         if items:
             sections.append((key, items))
     return front, sections
+
+
+def section_label_for(key: str, language: str) -> str:
+    from . import i18n
+
+    return i18n.t(language, f"sec_{key}")
 
 
 def section_label(key: str, hi: bool) -> str:
@@ -239,7 +247,7 @@ def write_edition(desk: Desk, day: date, research) -> AkhbarEdition:
     src_list = "\n".join(f"- {s['title']} - {s['url']}" for s in research.sources[:60])
     system = f"""You are the editor of a daily current-affairs newspaper published by "{settings.brand_name}".
 {desk_brief(desk)}
-- {llm.LANG_RULES.get(desk.language, llm.LANG_RULES['en'])}
+- {llm.lang_rule(desk.language)}
 - Use only facts from the research notes. Never invent numbers, names, quotes or dates. If a detail is unclear, leave it out.
 - Write like a quality newspaper: neutral, clear, short sentences, no opinions.
 - Every article must have a 'date' from the notes and at least one source URL from the notes.
@@ -316,35 +324,39 @@ def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, t
     from .config import PACKAGE_DIR
     from .render import fonts
 
+    from . import i18n
+    from .languages import get as get_language
+
     env = Environment(loader=FileSystemLoader(PACKAGE_DIR / "templates"), autoescape=select_autoescape(["html"]))
-    hi = desk.language == "hi"
+    lang = get_language(desk.language)
+    code = lang.code
+    hi = code == "hi"
+    labels = i18n.labels(code)
 
-    def face(name, fallback=("deva", "regular")):
-        return fonts.named(name, fallback).resolve().as_uri()
+    def uri(path) -> str:
+        return path.resolve().as_uri()
 
-    # Font roles. Hindi: Martel (newspaper serif) + Mukta labels + Rozha One masthead.
-    # English/Hinglish: Source Serif 4 text, Playfair Display headlines, blackletter masthead.
-    if hi:
-        faces = {"body": face("Martel-Regular.ttf"), "body_bold": face("Martel-Bold.ttf", ("deva", "bold")),
-                 "head": face("Martel-ExtraBold.ttf", ("deva", "heavy")), "mast": face("RozhaOne-Regular.ttf", ("deva", "heavy"))}
-    else:
-        faces = {"body": face("SourceSerif4-Regular.ttf", ("latin", "regular")), "body_bold": face("SourceSerif4-Bold.ttf", ("latin", "bold")),
-                 "head": face("PlayfairDisplay-Black.ttf", ("latin", "bold")), "mast": face("UnifrakturMaguntia-Regular.ttf", ("latin", "bold"))}
-    faces.update(sans=face("Mukta-Regular.ttf", ("deva", "regular")), sans_bold=face("Mukta-Bold.ttf", ("deva", "bold")),
-                 head_alt=face("Martel-ExtraBold.ttf", ("deva", "heavy")))
-    words = title.split()
-    title_top, title_main = (" ".join(words[:2]), " ".join(words[2:])) if len(words) >= 3 else ("", title)
+    # Font roles per script: Hindi = Martel + Rozha One; English/Hinglish = Source Serif 4 + Playfair +
+    # blackletter masthead; other scripts = Noto Serif/Sans <Script> (Urdu: Nastaliq). Mukta covers labels.
+    faces = {
+        "body": uri(fonts.for_language(code, "serif")), "body_bold": uri(fonts.for_language(code, "serif_bold")),
+        "head": uri(fonts.for_language(code, "head")), "mast": uri(fonts.for_language(code, "display")),
+        "sans": uri(fonts.for_language(code, "regular")), "sans_bold": uri(fonts.for_language(code, "bold")),
+        "head_alt": uri(fonts.font_path("deva", "head")), "latin_sans": uri(fonts.font_path("latin", "regular")),
+    }
+    title_top, title_main = _title_parts(title, labels)
+    mast_pt = _fit_pt(title_main, fonts.for_language(code, "display"), max_pt=37 if not lang.script == "latin" else 34, width_mm=112)
 
-    months_hi = ["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"]
-    days_hi = ["सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार", "रविवार"]
-    date_str = f"{days_hi[day.weekday()]}, {day.day} {months_hi[day.month - 1]} {day.year}" if hi else day.strftime("%A, %d %B %Y")
+    date_str = i18n.format_date(day, code)
     front, sections = layout(ed.articles)
     html = env.get_template("akhbar.html").render(
         ed=ed, desk=desk, edition_label=desk.label(), title=title, date_str=date_str, issue_no=issue_no, hi=hi,
-        front=front, sections=sections, section_label=lambda k: section_label(k, hi), photos=photos or {},
-        faces=faces, title_top=title_top, title_main=title_main,
-        motto="शिक्षा | सम्मान | अवसर",
-        cat=lambda c: CATEGORY_LABELS.get(c, CATEGORY_LABELS["other"])[0 if hi else 1],
+        lang=code, rtl=lang.rtl, T=labels, latin=lang.script == "latin",
+        front=front, sections=sections, section_label=lambda k: labels.get(f"sec_{k}", k), photos=photos or {},
+        faces=faces, title_top=title_top, title_main=title_main, mast_pt=mast_pt,
+        justify=lang.script in ("latin", "deva", "arab", "beng", "guru", "gujr", "orya"),
+        motto=labels["motto"],
+        cat=lambda c: labels.get(f"cat_{c}", labels["cat_other"]),
         logo_url=settings.brand_logo.resolve().as_uri() if settings.brand_logo.exists() else None,
         brand=settings.brand_name, handle=settings.brand_handle, owner=settings.copyright_owner or settings.brand_name,
         year=day.year, watermark=settings.pdf_watermark,
@@ -355,6 +367,31 @@ def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, t
     return out
 
 
+def _title_parts(title: str, labels: dict) -> tuple[str, str]:
+    """Masthead = small brand line + big title. Uses the translated parts when the title is the default one."""
+    if title == labels.get("akhbar_title") and labels.get("akhbar_title_top") and labels.get("akhbar_title_main"):
+        return labels["akhbar_title_top"], labels["akhbar_title_main"]
+    for brand in (labels.get("akhbar_title_top"), "Indira Pathshala", "इंदिरा पाठशाला"):
+        if brand and title.startswith(brand + " "):
+            return brand, title[len(brand) + 1:]
+    words = title.split()
+    return (" ".join(words[:2]), " ".join(words[2:])) if len(words) >= 3 else ("", title)
+
+
+def _fit_pt(text: str, font_file, max_pt: float, width_mm: float, min_pt: float = 18) -> float:
+    """Largest point size (<= max_pt) at which `text` fits width_mm in this font."""
+    try:
+        from PIL import ImageFont
+
+        width = ImageFont.truetype(str(font_file), 100).getlength(text)  # in points at 100 pt
+        if width <= 0:
+            return max_pt
+        fit = 100 * (width_mm / 0.3528) / width
+        return round(max(min_pt, min(max_pt, fit)), 1)
+    except Exception:
+        return max_pt
+
+
 def publish_telegram(ed: AkhbarEdition, desk: Desk, pdf: Path, title: str, date_str: str, chat_id: str, questions: bool = True) -> dict:
     import time
 
@@ -362,7 +399,9 @@ def publish_telegram(ed: AkhbarEdition, desk: Desk, pdf: Path, title: str, date_
 
     tg = Telegram()
     heads = "\n".join(f"▪️ {safe_html(a.headline)}" for a in ed.articles[:6])
-    label = "आज के मुख्य समाचार" if desk.language == "hi" else "Today's top stories"
+    from . import i18n
+
+    label = i18n.t(desk.language, "top_stories")
     cap = f"🗞 <b>{safe_html(title)}</b> · {safe_html(desk.label())}\n{safe_html(date_str)}\n\n<b>{label}</b>\n{heads}\n\n📥 PDF ⬆️ | {safe_html(settings.brand_handle)}"
     res = {"chat_id": chat_id, "messages": [tg.send_document(chat_id, pdf, cap[:1024])["message_id"]]}
     if questions:
@@ -383,7 +422,14 @@ def run(desk: Desk, channels: list | None = None, questions: bool = True, day: d
     run_dir.mkdir(parents=True, exist_ok=True)
     result = AkhbarResult(run_dir, desk)
     hi = desk.language == "hi"
-    title = title or (settings.akhbar_title_hi if hi else settings.akhbar_title_en) or ("इंदिरा पाठशाला समसामयिकी पत्रिका" if hi else "Indira Pathshala Samsamayiki Patrika")
+    from . import i18n
+
+    if not title:
+        if hi:
+            title = settings.akhbar_title_hi
+        elif desk.language in ("en", "hinglish"):
+            title = settings.akhbar_title_en
+        title = title or i18n.t(desk.language, "akhbar_title")
     hkey = f"akhbar:{desk.key}"
 
     try:
@@ -408,7 +454,7 @@ def run(desk: Desk, channels: list | None = None, questions: bool = True, day: d
         result.errors["build"] = traceback.format_exc()
 
     if result.pdf and channels:
-        date_str = day.strftime("%d-%m-%Y")
+        date_str = i18n.format_date(day, desk.language)
         for ch in channels:
             if ch.platform != "telegram":
                 continue
