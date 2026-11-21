@@ -2,21 +2,19 @@
 
     python -m pathshala_bot serve            # UI + scheduler + Telegram bot in one process
 
-Protected with HTTP Basic auth (ADMIN_USER / ADMIN_PASSWORD).
+Protected by a login page + signed session cookie (ADMIN_USER / ADMIN_PASSWORD), see auth.py.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import control
@@ -24,22 +22,29 @@ from ..config import settings
 from ..scheduler import Scheduler
 from ..supabase_db import configured as supabase_configured
 from ..store import get_history
+from . import auth
 
 log = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent
-security = HTTPBasic(realm="Pathshala admin")
 
 
-def require_admin(creds: HTTPBasicCredentials = Depends(security)) -> str:
-    user = os.getenv("ADMIN_USER", "admin")
-    password = os.getenv("ADMIN_PASSWORD", "")
-    if not password:
+def current_user(request: Request) -> str | None:
+    return auth.read_token(request.cookies.get(auth.COOKIE)) or auth.check_basic_header(request.headers.get("authorization"))
+
+
+def require_admin(request: Request) -> str:
+    """API guard. Answers 401 *without* a WWW-Authenticate header, so browsers never pop up a dialog."""
+    if not auth.admin_password():
         raise HTTPException(503, "ADMIN_PASSWORD is not set. Add ADMIN_PASSWORD=... to .env and restart the server "
                                  "(with Docker: docker rm -f pathshala, then docker run ... again).")
-    ok = secrets.compare_digest(creds.username.encode(), user.encode()) and secrets.compare_digest(creds.password.encode(), password.encode())
-    if not ok:
-        raise HTTPException(401, "Wrong username or password", headers={"WWW-Authenticate": "Basic"})
-    return creds.username
+    user = current_user(request)
+    if not user:
+        raise HTTPException(401, "Not logged in")
+    return user
+
+
+def _client_addr(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def create_app(with_bot: bool = True) -> FastAPI:
@@ -75,9 +80,49 @@ def create_app(with_bot: bool = True) -> FastAPI:
         """Unauthenticated liveness check (used by the Docker HEALTHCHECK). Reveals no settings."""
         return {"ok": True, "settings_loaded": sched.error is None}
 
-    @app.get("/", response_class=HTMLResponse, dependencies=guard)
-    def index():
-        return (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    @app.get("/", response_class=HTMLResponse)
+    def index(request: Request):
+        if not auth.admin_password() or not current_user(request):
+            return RedirectResponse("/login", status_code=303)
+        return HTMLResponse((WEB_DIR / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, error: str = ""):
+        if auth.admin_password() and current_user(request):
+            return RedirectResponse("/", status_code=303)
+        return HTMLResponse(_login_html(error, missing_password=not auth.admin_password()), headers={"Cache-Control": "no-store"})
+
+    @app.post("/login")
+    async def login(request: Request):
+        from urllib.parse import parse_qs
+
+        if not auth.admin_password():
+            return RedirectResponse("/login", status_code=303)
+        addr = _client_addr(request)
+        wait = auth.limiter.blocked(addr)
+        if wait:
+            return RedirectResponse(f"/login?error=locked&wait={wait}", status_code=303)
+        form = parse_qs((await request.body()).decode("utf-8", "replace"))
+        user = (form.get("username") or [""])[0]
+        password = (form.get("password") or [""])[0]
+        if not auth.check_password(user, password):
+            auth.limiter.fail(addr)
+            import asyncio
+
+            await asyncio.sleep(1)  # slow down guessing
+            return RedirectResponse("/login?error=wrong", status_code=303)
+        auth.limiter.reset(addr)
+        resp = RedirectResponse("/", status_code=303)
+        secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+        resp.set_cookie(auth.COOKIE, auth.make_token(user), max_age=auth.SESSION_DAYS * 86400,
+                        httponly=True, samesite="lax", secure=secure, path="/")
+        return resp
+
+    @app.post("/logout")
+    def logout():
+        resp = RedirectResponse("/login", status_code=303)
+        resp.delete_cookie(auth.COOKIE, path="/")
+        return resp
 
     @app.get("/api/config", dependencies=guard)
     def get_config():
@@ -200,3 +245,42 @@ async def _stop_bot(app):
         await app.shutdown()
     except Exception:
         log.exception("bot shutdown")
+
+
+def _login_html(error: str, missing_password: bool) -> str:
+    import html
+
+    msg = ""
+    if missing_password:
+        msg = ("<div class='err'><b>ADMIN_PASSWORD is not set.</b><br>Add <code>ADMIN_PASSWORD=...</code> to <code>.env</code> and restart "
+               "the server (Docker: <code>docker rm -f pathshala</code>, then <code>docker run ...</code> again).</div>")
+    elif error == "wrong":
+        msg = "<div class='err'>Wrong username or password.</div>"
+    elif error == "locked":
+        msg = "<div class='err'>Too many failed attempts. Please wait a few minutes and try again.</div>"
+    brand = html.escape(settings.brand_name)
+    disabled = "disabled" if missing_password else ""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{brand} · Login</title>
+<style>
+  :root {{ --bg:#f5f6fa; --panel:#fff; --ink:#141833; --muted:#646a86; --line:#e3e6f0; --accent:#ff8a1f; --bad:#d1343b; }}
+  @media (prefers-color-scheme: dark) {{ :root {{ --bg:#0f1222; --panel:#171b31; --ink:#e8eaf6; --muted:#9aa0bf; --line:#2a2f4d; }} }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px;
+         font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Devanagari",sans-serif; background:var(--bg); color:var(--ink); }}
+  form {{ width:100%; max-width:360px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:24px; }}
+  h1 {{ font-size:19px; margin:0 0 4px; }} p {{ margin:0 0 18px; color:var(--muted); font-size:13px; }}
+  label {{ display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }}
+  input {{ width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }}
+  button {{ width:100%; margin-top:18px; padding:10px; border:0; border-radius:8px; background:var(--accent); color:#1a1200; font:600 15px system-ui,sans-serif; cursor:pointer; }}
+  button:disabled {{ opacity:.5; cursor:default; }}
+  .err {{ border:1px solid var(--bad); background:color-mix(in srgb, var(--bad) 12%, var(--panel)); border-radius:8px; padding:9px 12px; font-size:13px; margin-bottom:6px; }}
+  code {{ font-size:12px; }}
+</style></head><body>
+<form method="post" action="/login" autocomplete="on">
+  <h1>{brand} · Control</h1><p>Sign in to manage channels, exams and schedules.</p>
+  {msg}
+  <label for="u">Username</label><input id="u" name="username" value="{html.escape(auth.admin_user())}" autocomplete="username" required {disabled}>
+  <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required autofocus {disabled}>
+  <button type="submit" {disabled}>Sign in</button>
+</form></body></html>"""

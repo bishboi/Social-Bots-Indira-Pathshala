@@ -82,7 +82,7 @@ Start everything with one command: the web panel, the scheduler and the Telegram
 ADMIN_PASSWORD=choose-a-password python -m pathshala_bot serve
 ```
 
-Then open http://localhost:8080 and log in as `admin`. The panel has six tabs:
+Then open http://localhost:8080. You'll get a login page: sign in as `admin` (or your `ADMIN_USER`) with your `ADMIN_PASSWORD`. The panel has six tabs:
 
 | Tab | What you configure |
 |---|---|
@@ -93,7 +93,7 @@ Then open http://localhost:8080 and log in as `admin`. The panel has six tabs:
 | **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels |
 | **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, and API keys. Keys are stored on the server and only ever shown masked. |
 
-Settings are saved to Supabase (`app_config`) when it's configured, otherwise to `output/control.json` (readable only by the server's own user). On the first start they're seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. The panel uses HTTP Basic auth (`ADMIN_USER` / `ADMIN_PASSWORD`), so put it behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
+Settings are saved to Supabase (`app_config`) when it's configured, otherwise to `output/control.json` (readable only by the server's own user). On the first start they're seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. Sign-in uses a login page and a signed session cookie that lasts 7 days. The cookie is HttpOnly and SameSite=Lax, and it's marked Secure over HTTPS. Repeated wrong passwords are locked out for a while, and changing `ADMIN_PASSWORD` signs everyone out. Scripts can still call the API with `curl -u admin:<password>`. Put the panel behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
 
 ## Daily current-affairs newspaper (Akhbar)
 
