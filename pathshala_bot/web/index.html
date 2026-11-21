@@ -73,8 +73,10 @@
 
 <main x-show="!cfg && loadError" style="display:none">
   <div class="err"><b>The panel could not load its settings.</b><br><span x-text="loadError"></span>
-    <br><br>Common fixes: run <code>supabase/schema.sql</code> in the Supabase SQL editor, use the <b>service_role</b> key in
-    <code>SUPABASE_SERVICE_ROLE_KEY</code>, check <code>SUPABASE_URL</code>, then restart the server. Check with
+    <br><br>Common fixes: in <code>SUPABASE_SERVICE_ROLE_KEY</code> use a <b>Secret key</b> (<code>sb_secret_…</code>, Project Settings → API Keys)
+    or the legacy <b>service_role</b> key – not the publishable/anon key; check <code>SUPABASE_URL</code> is
+    <code>https://&lt;project&gt;.supabase.co</code> from the same project; run <code>supabase/schema.sql</code> in the SQL editor.
+    Then recreate the container (<code>docker rm -f pathshala</code> + <code>docker run …</code>). Check with
     <code>python -m pathshala_bot db-check</code>. This page retries every 10 seconds.</div>
 </main>
 <template x-if="cfg"><main>

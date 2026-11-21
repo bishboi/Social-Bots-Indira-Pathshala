@@ -56,10 +56,10 @@ On a server, keep the app's data in **Supabase** so nothing is lost on restarts 
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. Create the tables: open **SQL Editor**, paste [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. Alternatively, set `SUPABASE_DB_URL` and run `python -m pathshala_bot db-init`.
-3. Add the credentials from **Project Settings → API** to `.env`:
+3. Add the credentials from **Project Settings → API Keys** to `.env`. Use a **Secret key** (`sb_secret_…`) or, on older projects, the legacy **service_role** key (`eyJ…`). Don't use the publishable or anon key.
    ```bash
    SUPABASE_URL=https://<project>.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=<service_role key>
+   SUPABASE_SERVICE_ROLE_KEY=<secret or service_role key>
    ```
 4. Check the connection:
    ```bash
@@ -271,6 +271,7 @@ docker logs pathshala
 |---|---|
 | `The container name "/pathshala" is already in use` | Remove the old container first: `docker rm -f pathshala`, then `docker run …` again |
 | Panel says *ADMIN_PASSWORD is not set* | Add `ADMIN_PASSWORD=…` to `.env`, then recreate the container |
+| *Invalid API key* | Use a **Secret key** (`sb_secret_…`) or the legacy **service_role** key from the **same project** as `SUPABASE_URL`, not the publishable or anon key. Then run `db-check`, which names the key type and any mismatch |
 | Dashboard shows *Cannot reach Supabase* or *does not exist* | Check `SUPABASE_URL`, run `supabase/schema.sql` in the SQL editor, use the **service_role** key, then `docker exec pathshala python -m pathshala_bot db-check` |
 | Changed `.env` but nothing changed | A container reads `.env` only when it's created: `docker rm -f pathshala`, then `docker run …` again |
 | Pulled new code | `docker build -t pathshala .`, then `docker rm -f pathshala` and `docker run …` again |

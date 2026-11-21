@@ -164,7 +164,7 @@ def test_helpful_errors(monkeypatch):
         return httpx.Response(401, json={"message": "permission denied for table runs"})
 
     db = supabase_db.Supabase("https://x.supabase.co", "k", transport=httpx.MockTransport(denied))
-    with pytest.raises(supabase_db.SupabaseError, match="service_role"):
+    with pytest.raises(supabase_db.SupabaseError, match="truncated"):  # "k" is not a valid key of any kind
         db.select("runs")
 
 
@@ -195,3 +195,48 @@ def test_pipeline_run_is_recorded_in_supabase(fake, tmp_path):
     row = fake.tables["runs"][-1]
     assert row["exam_id"] == "rajasthan-si" and row["status"] == "ok"
     assert row["content"]["mcqs"][0]["correct_index"] == 0  # whole package stored as JSON for /quiz
+
+
+def _jwt(role, ref):
+    import base64
+
+    b = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
+    return f"{b({'alg': 'HS256'})}.{b({'role': role, 'ref': ref})}.sig"
+
+
+def test_new_secret_keys_are_not_sent_as_bearer():
+    seen = {}
+
+    def handler(request):
+        seen.update(request.headers)
+        return httpx.Response(200, json=[])
+
+    supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_xyz", transport=httpx.MockTransport(handler)).select("runs")
+    assert seen["apikey"] == "sb_secret_xyz" and "authorization" not in seen
+    seen.clear()
+    legacy = _jwt("service_role", "abcd1234")
+    supabase_db.Supabase("https://abcd1234.supabase.co", legacy, transport=httpx.MockTransport(handler)).select("runs")
+    assert seen["apikey"] == legacy and seen["authorization"] == f"Bearer {legacy}"
+
+
+def test_key_and_url_diagnosis():
+    d = supabase_db.diagnose
+    assert supabase_db.normalize_url("abcd1234.supabase.co/rest/v1/") == "https://abcd1234.supabase.co"
+    assert d("https://abcd1234.supabase.co", "sb_secret_x") == []
+    assert d("https://abcd1234.supabase.co", _jwt("service_role", "abcd1234")) == []
+    assert "Publishable" in d("https://abcd1234.supabase.co", "sb_publishable_x")[0]
+    assert "anon" in d("https://abcd1234.supabase.co", _jwt("anon", "abcd1234"))[0]
+    assert "different project" in " ".join(d("https://abcd1234.supabase.co", _jwt("service_role", "other999")))
+    assert "truncated" in d("https://abcd1234.supabase.co", "nonsense")[0]
+
+
+def test_invalid_key_error_names_the_cause():
+    def reject(request):
+        return httpx.Response(401, json={"message": "Invalid API key"})
+
+    db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_publishable_x", transport=httpx.MockTransport(reject))
+    with pytest.raises(supabase_db.SupabaseError, match="Publishable key"):
+        db.select("app_config")
+    db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_x", transport=httpx.MockTransport(reject))
+    with pytest.raises(supabase_db.SupabaseError, match="legacy service_role"):
+        db.select("app_config")

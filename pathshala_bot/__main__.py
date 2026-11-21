@@ -123,6 +123,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"db-init failed: {e}")
                 return 1
             print("Schema applied.")
+        from .config import settings as _s
+
+        kinds = {"secret": "Secret key (sb_secret_...) - OK", "service_role": "legacy service_role key - OK",
+                 "publishable": "Publishable key - WRONG KEY", "anon": "anon key - WRONG KEY"}
+        print(f"  URL         {supabase_db.normalize_url(_s.supabase_url)}")
+        print(f"  Key type    {kinds.get(supabase_db.key_kind(_s.supabase_key), supabase_db.key_kind(_s.supabase_key))}")
+        for problem in supabase_db.diagnose():
+            print(f"  PROBLEM     {problem}")
         status = supabase_db.Supabase().check()
         for table, st in status.items():
             print(f"  {table:11} {'OK' if st == 'ok' else 'ERROR: ' + st}")
