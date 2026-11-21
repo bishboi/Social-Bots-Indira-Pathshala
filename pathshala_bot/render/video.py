@@ -106,7 +106,7 @@ def render_manim(pkg: ContentPackage, exam: Exam, plan: list[dict], work_dir: Pa
         "brand": settings.brand_name,
         "handle": settings.brand_handle,
         "labels": LABELS_HI if exam.language == "hi" else {},
-        "font_files": [str(fonts.font_path(s, w)) for s in ("deva", "latin") for w in ("regular", "bold")],
+        "font_files": sorted({str(fonts.font_path(s, w)) for s in ("deva", "latin") for w in ("regular", "medium", "semibold", "bold", "heavy")}),
         "latex": bool(shutil.which("latex") and shutil.which("dvisvgm")),
         "out_dir": str(work_dir),
         "fps": int(os.getenv("MANIM_FPS", FPS)),

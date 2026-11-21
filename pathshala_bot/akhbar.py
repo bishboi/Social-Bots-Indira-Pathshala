@@ -319,11 +319,22 @@ def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, t
 
     env = Environment(loader=FileSystemLoader(PACKAGE_DIR / "templates"), autoescape=select_autoescape(["html"]))
     hi = desk.language == "hi"
-    idx = fonts._index()
 
-    def face(name, fallback):
-        p = idx.get(name) or fonts.font_path(*fallback)
-        return Path(p).resolve().as_uri()
+    def face(name, fallback=("deva", "regular")):
+        return fonts.named(name, fallback).resolve().as_uri()
+
+    # Font roles. Hindi: Martel (newspaper serif) + Mukta labels + Rozha One masthead.
+    # English/Hinglish: Source Serif 4 text, Playfair Display headlines, blackletter masthead.
+    if hi:
+        faces = {"body": face("Martel-Regular.ttf"), "body_bold": face("Martel-Bold.ttf", ("deva", "bold")),
+                 "head": face("Martel-ExtraBold.ttf", ("deva", "heavy")), "mast": face("RozhaOne-Regular.ttf", ("deva", "heavy"))}
+    else:
+        faces = {"body": face("SourceSerif4-Regular.ttf", ("latin", "regular")), "body_bold": face("SourceSerif4-Bold.ttf", ("latin", "bold")),
+                 "head": face("PlayfairDisplay-Black.ttf", ("latin", "bold")), "mast": face("UnifrakturMaguntia-Regular.ttf", ("latin", "bold"))}
+    faces.update(sans=face("Mukta-Regular.ttf", ("deva", "regular")), sans_bold=face("Mukta-Bold.ttf", ("deva", "bold")),
+                 head_alt=face("Martel-ExtraBold.ttf", ("deva", "heavy")))
+    words = title.split()
+    title_top, title_main = (" ".join(words[:2]), " ".join(words[2:])) if len(words) >= 3 else ("", title)
 
     months_hi = ["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"]
     days_hi = ["सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार", "रविवार"]
@@ -332,13 +343,9 @@ def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, t
     html = env.get_template("akhbar.html").render(
         ed=ed, desk=desk, edition_label=desk.label(), title=title, date_str=date_str, issue_no=issue_no, hi=hi,
         front=front, sections=sections, section_label=lambda k: section_label(k, hi), photos=photos or {},
-        masthead_font=face("RozhaOne-Regular.ttf", ("deva", "bold")) if hi else face("UnifrakturMaguntia-Regular.ttf", ("latin", "bold")),
+        faces=faces, title_top=title_top, title_main=title_main,
         motto="शिक्षा | सम्मान | अवसर",
         cat=lambda c: CATEGORY_LABELS.get(c, CATEGORY_LABELS["other"])[0 if hi else 1],
-        serif_regular=face("NotoSerifDevanagari-Regular.ttf", ("deva", "regular")),
-        serif_bold=face("NotoSerifDevanagari-Bold.ttf", ("deva", "bold")),
-        sans_regular=fonts.font_path("deva" if hi else "latin", "regular").resolve().as_uri(),
-        sans_bold=fonts.font_path("deva" if hi else "latin", "bold").resolve().as_uri(),
         logo_url=settings.brand_logo.resolve().as_uri() if settings.brand_logo.exists() else None,
         brand=settings.brand_name, handle=settings.brand_handle, owner=settings.copyright_owner or settings.brand_name,
         year=day.year, watermark=settings.pdf_watermark,
@@ -377,7 +384,7 @@ def run(desk: Desk, channels: list | None = None, questions: bool = True, day: d
     run_dir.mkdir(parents=True, exist_ok=True)
     result = AkhbarResult(run_dir, desk)
     hi = desk.language == "hi"
-    title = title or (settings.akhbar_title_hi if hi else settings.akhbar_title_en) or ("पाठशाला समाचार" if hi else "Pathshala Times")
+    title = title or (settings.akhbar_title_hi if hi else settings.akhbar_title_en) or ("इंदिरा पाठशाला समसामयिकी पत्रिका" if hi else "Indira Pathshala Samsamayiki Patrika")
     hkey = f"akhbar:{desk.key}"
 
     try:

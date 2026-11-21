@@ -133,8 +133,8 @@ class General(BaseModel):
     tts_provider: Literal["auto", "elevenlabs", "edge", "none"] = "auto"
     mnemonic_review: bool = True
     pdf_watermark: bool = True
-    akhbar_title_hi: str = "पाठशाला समाचार"
-    akhbar_title_en: str = "Pathshala Times"
+    akhbar_title_hi: str = "इंदिरा पाठशाला समसामयिकी पत्रिका"
+    akhbar_title_en: str = "Indira Pathshala Samsamayiki Patrika"
     akhbar_articles: int = 10
     telegram_admin_ids: list[str] = Field(default_factory=list)
 
@@ -209,6 +209,11 @@ def load() -> ControlConfig:
         else:
             cfg = _seed_from_env()
             save(cfg)
+        # renamed paper: replace the old default titles (custom titles are kept)
+        if cfg.general.akhbar_title_hi == "पाठशाला समाचार":
+            cfg.general.akhbar_title_hi = General().akhbar_title_hi
+        if cfg.general.akhbar_title_en == "Pathshala Times":
+            cfg.general.akhbar_title_en = General().akhbar_title_en
         # exams added to the catalogue later show up automatically
         known = {e.exam_id for e in cfg.exams}
         for e in all_exam_defs(cfg).values():

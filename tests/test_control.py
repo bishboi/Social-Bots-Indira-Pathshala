@@ -278,7 +278,7 @@ def test_newspaper_layout_sections():
     assert keys.index("world") < keys.index("sports")  # section order follows a newspaper
 
 
-@pytest.mark.parametrize("region,lang,title", [("Rajasthan", "hi", "पाठशाला समाचार"), ("central", "en", "Pathshala Times")])
+@pytest.mark.parametrize("region,lang,title", [("Rajasthan", "hi", "इंदिरा पाठशाला समसामयिकी पत्रिका"), ("central", "en", "Indira Pathshala Samsamayiki Patrika")])
 def test_newspaper_renders_each_edition(ctl, tmp_path, region, lang, title):
     pytest.importorskip("weasyprint")
     from datetime import date

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Downloads the fonts used by slides, cards and PDFs into assets/fonts/.
-# Noto Sans Devanagari is required for Hindi; Poppins is used for English text.
+# Mukta (Hindi / Hinglish UI and video text), Martel + Rozha One (Hindi newspaper), Poppins (English UI),
+# Source Serif 4 + Playfair Display + UnifrakturMaguntia (English newspaper). Noto fonts are fallbacks.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)/assets/fonts"
 mkdir -p "$DIR"
@@ -23,3 +24,17 @@ fetch "Noto+Serif+Devanagari" NotoSerifDevanagari 700 Bold
 # Newspaper mastheads: Rozha One (Devanagari display) and UnifrakturMaguntia (blackletter, English)
 fetch "Rozha+One" RozhaOne 400 Regular
 fetch "UnifrakturMaguntia" UnifrakturMaguntia 400 Regular
+# Newspaper text faces: Martel (Devanagari serif), Source Serif 4 + Playfair Display (English editions)
+fetch "Martel" Martel 400 Regular
+fetch "Martel" Martel 700 Bold
+fetch "Martel" Martel 800 ExtraBold
+fetch "Source+Serif+4" SourceSerif4 400 Regular
+fetch "Source+Serif+4" SourceSerif4 700 Bold
+fetch "Playfair+Display" PlayfairDisplay 700 Bold
+fetch "Playfair+Display" PlayfairDisplay 900 Black
+# UI / notes / video text: Mukta (Devanagari + Latin sans)
+fetch "Mukta" Mukta 400 Regular
+fetch "Mukta" Mukta 500 Medium
+fetch "Mukta" Mukta 600 SemiBold
+fetch "Mukta" Mukta 700 Bold
+fetch "Mukta" Mukta 800 ExtraBold

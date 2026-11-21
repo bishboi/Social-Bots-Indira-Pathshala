@@ -54,7 +54,7 @@ def has_deva(s: str) -> bool:
 
 
 class Fonts:
-    deva = "Noto Sans Devanagari"
+    deva = "Mukta"
     latin = "Poppins"
 
     def __init__(self, spec):

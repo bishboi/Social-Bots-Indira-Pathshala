@@ -41,8 +41,8 @@ class Settings:
     copyright_owner: str = field(default_factory=lambda: _env("COPYRIGHT_OWNER"))
     pdf_watermark: bool = field(default_factory=lambda: _bool("PDF_WATERMARK", True))
     # Daily current-affairs newspaper
-    akhbar_title_hi: str = field(default_factory=lambda: _env("AKHBAR_TITLE_HI", "पाठशाला समाचार"))
-    akhbar_title_en: str = field(default_factory=lambda: _env("AKHBAR_TITLE_EN", "Pathshala Times"))
+    akhbar_title_hi: str = field(default_factory=lambda: _env("AKHBAR_TITLE_HI", "इंदिरा पाठशाला समसामयिकी पत्रिका"))
+    akhbar_title_en: str = field(default_factory=lambda: _env("AKHBAR_TITLE_EN", "Indira Pathshala Samsamayiki Patrika"))
     akhbar_articles: int = field(default_factory=lambda: int(_env("AKHBAR_ARTICLES", "10")))
 
     # Claude

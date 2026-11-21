@@ -142,7 +142,7 @@ def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> P
     label_font = font_for("A", 40, "bold", "en")
     d.text((80, 330), KIND_LABEL.get(slide.kind, ""), font=label_font, fill=accent)
     heading = clean(slide.heading)
-    hfont, hlines, hlh = fit_text(d, heading, W - 160, 420, "bold", lang, start=104, minimum=56, spacing=1.25)
+    hfont, hlines, hlh = fit_text(d, heading, W - 160, 420, "heavy", lang, start=104, minimum=56, spacing=1.25)
     y = draw_lines(d, hlines, hfont, 80, 400, hlh, WHITE)
 
     # body card: sized to its text, centred in the space between heading and footer
@@ -162,7 +162,7 @@ def render_slide(slide: Scene, idx: int, total: int, exam: Exam, out: Path) -> P
     body = clean(scene_text(slide))
     pad = 64
     area_top, area_bottom = y + 70, H - 300
-    bfont, blines, blh = fit_text(d, body, W - 120 - 2 * pad, area_bottom - area_top - 2 * pad, "regular", lang, start=76, minimum=36, spacing=1.45)
+    bfont, blines, blh = fit_text(d, body, W - 120 - 2 * pad, area_bottom - area_top - 2 * pad, "medium", lang, start=76, minimum=36, spacing=1.45)
     card_h = max(420, len(blines) * blh + 2 * pad)
     card_top = area_top + max(0, (area_bottom - area_top - card_h) // 3)
     card = (60, card_top, W - 60, card_top + card_h)
@@ -202,7 +202,7 @@ def render_card(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
     _chip(d, (60, 60), clean(pkg.subject)[:28], (90, 200, 250), BG_TOP, lang)
 
     title = clean(pkg.title)
-    tfont, tlines, tlh = fit_text(d, title, cw - 120, 300, "bold", lang, start=84, minimum=48, spacing=1.25)
+    tfont, tlines, tlh = fit_text(d, title, cw - 120, 300, "heavy", lang, start=84, minimum=48, spacing=1.25)
     y = draw_lines(d, tlines, tfont, 60, 170, tlh, WHITE) + 30
     d.line((60, y, 260, y), fill=SAFFRON, width=8)
     y += 40
@@ -211,7 +211,7 @@ def render_card(pkg: ContentPackage, exam: Exam, out: Path) -> Path:
     avail = ch - y - 140
     size = 44
     while size > 28:
-        f = font_for(" ".join(points), size, "regular", lang)
+        f = font_for(" ".join(points), size, "medium", lang)
         lh = int(size * 1.4)
         wrapped = [wrap(d, p, f, cw - 180) for p in points]
         need = sum(len(w) * lh + 22 for w in wrapped)

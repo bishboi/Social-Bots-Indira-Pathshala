@@ -1,4 +1,8 @@
-"""Font discovery. Devanagari needs a font with Devanagari glyphs (Noto Sans Devanagari)."""
+"""Font discovery.
+
+Mukta (Devanagari + Latin sans, 5 weights) for Hindi/Hinglish text on slides, cards, notes and video;
+Poppins for English-only text. Noto fonts remain as fallbacks. Weights: regular, medium, semibold, bold, heavy.
+"""
 
 from __future__ import annotations
 
@@ -21,10 +25,16 @@ SEARCH_DIRS = [
 ]
 
 CANDIDATES = {
-    ("deva", "bold"): ["NotoSansDevanagari-Bold.ttf", "NotoSansDevanagari-SemiBold.ttf", "Mukta-Bold.ttf", "Lohit-Devanagari.ttf"],
-    ("deva", "regular"): ["NotoSansDevanagari-Regular.ttf", "Mukta-Regular.ttf", "Lohit-Devanagari.ttf"],
-    ("latin", "bold"): ["Poppins-Bold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf"],
+    ("deva", "regular"): ["Mukta-Regular.ttf", "NotoSansDevanagari-Regular.ttf", "Lohit-Devanagari.ttf"],
+    ("deva", "medium"): ["Mukta-Medium.ttf", "Mukta-Regular.ttf", "NotoSansDevanagari-Regular.ttf"],
+    ("deva", "semibold"): ["Mukta-SemiBold.ttf", "Mukta-Bold.ttf", "NotoSansDevanagari-Bold.ttf"],
+    ("deva", "bold"): ["Mukta-Bold.ttf", "NotoSansDevanagari-Bold.ttf", "Lohit-Devanagari.ttf"],
+    ("deva", "heavy"): ["Mukta-ExtraBold.ttf", "Mukta-Bold.ttf", "NotoSansDevanagari-Bold.ttf"],
     ("latin", "regular"): ["Poppins-Regular.ttf", "NotoSans-Regular.ttf", "DejaVuSans.ttf"],
+    ("latin", "medium"): ["Poppins-Regular.ttf", "NotoSans-Regular.ttf", "DejaVuSans.ttf"],
+    ("latin", "semibold"): ["Poppins-Bold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf"],
+    ("latin", "bold"): ["Poppins-Bold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf"],
+    ("latin", "heavy"): ["Poppins-Bold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf"],
 }
 
 
@@ -61,3 +71,8 @@ def font_path(script: str, weight: str) -> Path:
 def pick(text: str, weight: str = "regular", language: str = "en") -> Path:
     script = "deva" if (language == "hi" or has_devanagari(text)) else "latin"
     return font_path(script, weight)
+
+
+def named(filename: str, fallback: tuple[str, str] = ("deva", "regular")) -> Path:
+    """A specific bundled font file (e.g. 'Martel-ExtraBold.ttf'), or a sensible fallback."""
+    return _index().get(filename) or font_path(*fallback)
