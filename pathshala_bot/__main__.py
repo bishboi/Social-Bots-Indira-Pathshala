@@ -181,6 +181,7 @@ def db_setup() -> int:
     kind = supabase_db.key_kind(settings.supabase_key)
     print(f"  URL:      {supabase_db.normalize_url(settings.supabase_url)}")
     print(f"  Key type: {kinds.get(kind, kind)}")
+    print(f"  Key:      {supabase_db.fingerprint(settings.supabase_key)}   <- compare with the dashboard")
     problems = supabase_db.diagnose()
     for p in problems:
         print(f"  PROBLEM:  {p}")
@@ -211,8 +212,20 @@ def db_setup() -> int:
         print(f"  {table:11} {'OK' if st == 'ok' else 'ERROR: ' + st}")
     if not all(v == "ok" for v in status.values()):
         if any("Invalid API key" in v or "(401)" in v for v in status.values()):
-            print("\n  Supabase rejected the key. Copy it again from THIS project (Project Settings → API Keys).\n"
-                  "  If a Secret key (sb_secret_...) keeps failing, use the legacy service_role key instead.")
+            ref = supabase_db.project_ref(settings.supabase_url) or "<project>"
+            print(f"""
+  Supabase rejected the key (tried it both with and without a Bearer header). To fix:
+   1. Open https://supabase.com/dashboard/project/{ref}/settings/api-keys
+      - this must be the SAME project as the URL above ({ref}).
+   2. Under "Secret keys", click the copy button next to the key (don't select the masked text).
+      Or create a new secret key there and copy that.
+   3. Put it in .env as  SUPABASE_SERVICE_ROLE_KEY=sb_secret_...   (one line, no quotes/spaces).
+   4. Recreate the container:  docker rm -f pathshala  then your docker run command, then db-setup again.
+  If a fresh Secret key is still rejected, use the legacy service_role key instead:
+   same page → "Legacy API Keys" tab → service_role → Reveal → copy (starts with eyJ...).
+  You can test a key directly with:
+   curl -s -o /dev/null -w "%{{http_code}}\\n" https://{ref}.supabase.co/rest/v1/ -H "apikey: YOUR_KEY"
+   (200 = key accepted, 401 = key rejected)""")
         else:
             print("\n  Create the tables (step 2), then run db-setup again.")
         return 1

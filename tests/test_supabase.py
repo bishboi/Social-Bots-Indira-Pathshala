@@ -14,6 +14,11 @@ from pathshala_bot.config import settings
 _REAL_SUPABASE = supabase_db.Supabase
 
 
+@pytest.fixture(autouse=True)
+def _reset_sb_mode(monkeypatch):
+    monkeypatch.setitem(supabase_db._SB_MODE, "bearer", None)
+
+
 class FakePostgREST:
     """Implements the subset of PostgREST the app uses: eq/neq/gte/not.is.null, order, limit, count, upsert."""
 
@@ -213,8 +218,8 @@ def test_new_secret_keys_are_not_sent_as_bearer():
         seen.update(request.headers)
         return httpx.Response(200, json=[])
 
-    supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_xyz", transport=httpx.MockTransport(handler)).select("runs")
-    assert seen["apikey"] == "sb_secret_xyz" and "authorization" not in seen
+    supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1", transport=httpx.MockTransport(handler)).select("runs")
+    assert seen["apikey"] == "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1" and "authorization" not in seen
     seen.clear()
     legacy = _jwt("service_role", "abcd1234")
     supabase_db.Supabase("https://abcd1234.supabase.co", legacy, transport=httpx.MockTransport(handler)).select("runs")
@@ -224,7 +229,7 @@ def test_new_secret_keys_are_not_sent_as_bearer():
 def test_key_and_url_diagnosis():
     d = supabase_db.diagnose
     assert supabase_db.normalize_url("abcd1234.supabase.co/rest/v1/") == "https://abcd1234.supabase.co"
-    assert d("https://abcd1234.supabase.co", "sb_secret_x") == []
+    assert d("https://abcd1234.supabase.co", "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1") == []
     assert d("https://abcd1234.supabase.co", _jwt("service_role", "abcd1234")) == []
     assert "Publishable" in d("https://abcd1234.supabase.co", "sb_publishable_x")[0]
     assert "anon" in d("https://abcd1234.supabase.co", _jwt("anon", "abcd1234"))[0]
@@ -239,7 +244,7 @@ def test_invalid_key_error_names_the_cause():
     db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_publishable_x", transport=httpx.MockTransport(reject))
     with pytest.raises(supabase_db.SupabaseError, match="Publishable key"):
         db.select("app_config")
-    db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_x", transport=httpx.MockTransport(reject))
+    db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1", transport=httpx.MockTransport(reject))
     with pytest.raises(supabase_db.SupabaseError, match="legacy service_role"):
         db.select("app_config")
 
@@ -248,18 +253,40 @@ def test_db_setup_seeds_settings(fake, capsys, monkeypatch):
     from pathshala_bot.__main__ import db_setup
 
     object.__setattr__(settings, "supabase_url", "https://abcd1234.supabase.co")
-    object.__setattr__(settings, "supabase_key", "sb_secret_test")
+    object.__setattr__(settings, "supabase_key", "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1")
 
     def gateway(request):  # like Supabase: sb_ keys arrive in `apikey` only; then hand over to the fake DB
-        assert "authorization" not in request.headers and request.headers["apikey"] == "sb_secret_test"
+        assert "authorization" not in request.headers and request.headers["apikey"] == "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1"
         request.headers["apikey"] = "service-key"
         request.headers["authorization"] = "Bearer service-key"
         return fake(request)
 
     monkeypatch.setattr(supabase_db, "Supabase", lambda *a, **k: _REAL_SUPABASE(
-        "https://abcd1234.supabase.co", "sb_secret_test", transport=httpx.MockTransport(gateway)))
+        "https://abcd1234.supabase.co", "sb_secret_Q7f3kLm9TzW2xVb8NcR4yHp1", transport=httpx.MockTransport(gateway)))
     assert db_setup() == 0
     out = capsys.readouterr().out
     assert "Secret key" in out and "Created settings from .env" in out and "Supabase is ready" in out
     assert len(fake.tables["app_config"]) == 1
     assert db_setup() == 0 and "kept your saved settings" in capsys.readouterr().out
+
+
+def test_sb_key_falls_back_to_bearer_and_remembers(monkeypatch):
+    monkeypatch.setitem(supabase_db._SB_MODE, "bearer", None)
+    calls = []
+
+    def needs_bearer(request):
+        calls.append("authorization" in request.headers)
+        if "authorization" not in request.headers:
+            return httpx.Response(401, json={"message": "Invalid API key"})
+        return httpx.Response(200, json=[])
+
+    db = supabase_db.Supabase("https://abcd1234.supabase.co", "sb_secret_" + "x" * 30, transport=httpx.MockTransport(needs_bearer))
+    assert db.select("runs") == [] and calls == [False, True]
+    db.select("runs")
+    assert calls == [False, True, True]  # remembered: Bearer first from now on
+
+
+def test_masked_or_short_keys_are_flagged():
+    assert "masking dots" in " ".join(supabase_db.diagnose("https://abcd1234.supabase.co", "sb_secret_ab••••••••••••••••••••••"))
+    assert "too short" in " ".join(supabase_db.diagnose("https://abcd1234.supabase.co", "sb_secret_abc"))
+    assert supabase_db.fingerprint("sb_secret_abcdefghijklmnopqrstuvwxyz1234") == "sb_secret_abcd…1234 (40 characters)"
