@@ -3,7 +3,7 @@
 An automated exam-prep content pipeline, a Telegram bot, an **admin panel** for configuring everything, and a **daily current-affairs newspaper**. Each content run:
 
 1. **Picks a target exam**: Rajasthan SI, JEE Main, NEET, CBSE 10, RBSE 12, REET, SSC CGL… (weighted random, or the one you choose). It then picks a subject, a seed topic and a format: previous-year-style quiz, concept explainer, cheatsheet, formula sheet, memory trick or current affairs.
-2. **Researches it on the internet.** Claude, using its web search tool, checks the current syllabus and previous-year question trends, picks one high-yield sub-topic it hasn't covered recently, and gathers facts from the sources it cites.
+2. **Researches it on the internet.** The AI (Claude or OpenAI, your choice – see [AI provider](#ai-provider)), using its web search tool, checks the current syllabus and previous-year question trends, picks one high-yield sub-topic it hasn't covered recently, and gathers facts from the sources it cites.
 3. **Writes every asset in one structured call:** the Telegram post, 3–5 MCQs, a cheatsheet, a memory trick, the script for a 6–9 slide short and the PDF revision notes. The content comes out in Hindi, English or Hinglish, depending on the exam.
 4. **Renders**
    - `card.png`: a 1080×1350 topic card
@@ -29,6 +29,26 @@ pathshala_bot/
   publish/          telegram.py, youtube.py, instagram.py
   bot.py            Telegram bot: commands + daily schedule
 ```
+
+## AI provider
+
+Every AI step can run on **Anthropic (Claude)** or **OpenAI**: topic research with web search, writing the posts, quizzes, notes and video scripts, the memory-trick review, and the daily newspaper. Choose in the panel (**Settings → AI provider**) or in `.env`:
+
+```bash
+LLM_PROVIDER=openai          # or anthropic (default)
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5.5         # any OpenAI model with the web_search tool + structured outputs
+```
+
+| | Anthropic | OpenAI |
+|---|---|---|
+| Key | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY` |
+| Default model | `claude-opus-5-5` (`CLAUDE_MODEL`) | `gpt-5.5` (`OPENAI_MODEL`) |
+| Web research | Claude web search tool, with cited sources | Responses API `web_search` tool, with URL citations |
+| Structured output | `output_format` (Pydantic) | `responses.parse` with `text_format` (strict JSON schema) |
+| Thinking depth | `RESEARCH_EFFORT` / `GENERATION_EFFORT` → `effort` | the same settings → `reasoning.effort` (left out for models without reasoning) |
+
+You only need the key for the provider you use. Switching takes effect on the next run, with no restart.
 
 ## Admin panel
 
@@ -215,7 +235,8 @@ Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`.
 
 | Service | How |
 |---|---|
-| Claude | `ANTHROPIC_API_KEY` from console.anthropic.com. The default model is `claude-opus-5-5`, with server-side refusal fallback turned on. |
+| AI: Claude | `ANTHROPIC_API_KEY` from console.anthropic.com. The default model is `claude-opus-5-5`, with server-side refusal fallback turned on. |
+| AI: OpenAI | `OPENAI_API_KEY` from platform.openai.com/api-keys, plus `LLM_PROVIDER=openai`. Set `OPENAI_MODEL` to a model your account has that supports web search. |
 | Telegram | Create a bot with @BotFather → `TELEGRAM_BOT_TOKEN`. Add the bot as an **admin** of your channel → `TELEGRAM_CHANNEL_ID=@yourchannel`. An exam can post to its own channel through `telegram_chat` in `exams.yaml`. |
 | YouTube | In Google Cloud, enable YouTube Data API v3 and create an OAuth client (Desktop app). Then run `python scripts/youtube_auth.py` to get `YOUTUBE_REFRESH_TOKEN`. Until Google audits your API project, uploads are forced to *private*. |
 | Instagram | You need an Instagram **professional** account linked to a Facebook Page, and a Meta app with `instagram_basic` and `instagram_content_publish`. Put a long-lived token in `INSTAGRAM_ACCESS_TOKEN` and the IG user ID in `INSTAGRAM_USER_ID`. |

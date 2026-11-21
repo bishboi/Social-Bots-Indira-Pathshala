@@ -230,8 +230,7 @@ FACTS: <bullet facts with names, numbers, dates>
 WHY IT MATTERS FOR THE EXAMS: <1-2 lines>
 SOURCES: <title - url> (one or more)
 Then 15 extra one-line facts (with dates) and their sources."""
-    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max(settings.max_web_searches, 12)}]
-    return llm.web_research(prompt, tools)
+    return llm.web_research(prompt, max(settings.max_web_searches, 12))
 
 
 def write_edition(desk: Desk, day: date, research) -> AkhbarEdition:

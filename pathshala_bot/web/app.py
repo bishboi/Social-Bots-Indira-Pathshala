@@ -92,7 +92,8 @@ def create_app(with_bot: bool = True) -> FastAPI:
             r["run"] = d.name
             r["files"] = sorted(p.name for p in d.glob("*") if p.suffix in (".pdf", ".mp4", ".png")) if d.is_dir() else []
         return {"jobs": sched.jobs(), "worker": sched.state(), "runs": runs, "bot": bool(state["bot"]),
-                "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY"))}
+                "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")), "openai_key": bool(os.getenv("OPENAI_API_KEY")),
+                "provider": settings.llm_provider}
 
     @app.post("/api/schedules/{sid}/run", dependencies=guard)
     async def run_now(sid: str, dry: bool = False):

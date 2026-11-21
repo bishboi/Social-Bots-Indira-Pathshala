@@ -45,8 +45,10 @@ class Settings:
     akhbar_title_en: str = field(default_factory=lambda: _env("AKHBAR_TITLE_EN", "Indira Pathshala Samsamayiki Patrika"))
     akhbar_articles: int = field(default_factory=lambda: int(_env("AKHBAR_ARTICLES", "10")))
 
-    # Claude
+    # AI provider: "anthropic" (Claude) or "openai"
+    llm_provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "anthropic").lower())
     claude_model: str = field(default_factory=lambda: _env("CLAUDE_MODEL", "claude-opus-5-5"))
+    openai_model: str = field(default_factory=lambda: _env("OPENAI_MODEL", "gpt-5.5"))
     research_effort: str = field(default_factory=lambda: _env("RESEARCH_EFFORT", "medium"))
     generation_effort: str = field(default_factory=lambda: _env("GENERATION_EFFORT", "high"))
     # Second Claude call that checks / rewrites the memory trick

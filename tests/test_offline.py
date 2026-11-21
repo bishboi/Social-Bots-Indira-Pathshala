@@ -227,20 +227,16 @@ def test_mnemonic_checks():
 
 
 def test_review_drops_trick_that_still_fails(monkeypatch):
-    from types import SimpleNamespace
-
     from pathshala_bot import llm
     from pathshala_bot.models import Mnemonic
 
     bad = Mnemonic(kind="sentence", trick="A-B-C-D", decode=[{"cue": "Q", "stands_for": "x"}], tip="")
     review = llm.MnemonicReview(verdict="rewrite", score=3, problems=["letter soup"], improved=bad)
-    fake = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(parse=lambda **k: SimpleNamespace(stop_reason="end_turn", parsed_output=review))))
-    monkeypatch.setattr(llm, "client", lambda: fake)
+    monkeypatch.setattr(llm, "structured", lambda *a, **k: review)
     p = ContentPackage.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
     assert llm.review_mnemonic(load_exams()["rajasthan-si"], p) is None
 
     good = p.mnemonic
     review2 = llm.MnemonicReview(verdict="keep", score=9, problems=[], improved=good)
-    fake2 = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(parse=lambda **k: SimpleNamespace(stop_reason="end_turn", parsed_output=review2))))
-    monkeypatch.setattr(llm, "client", lambda: fake2)
+    monkeypatch.setattr(llm, "structured", lambda *a, **k: review2)
     assert llm.review_mnemonic(load_exams()["rajasthan-si"], p) == good

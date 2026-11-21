@@ -273,6 +273,12 @@
 
   <!-- ============ SETTINGS ============ -->
   <section x-show="tab==='settings'">
+    <div class="card"><h3>AI provider</h3><div class="grid">
+      <div><label>Provider used for research and writing</label><select x-model="cfg.general.llm_provider" @change="touch()">
+        <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option></select></div>
+      <div x-show="cfg.general.llm_provider==='anthropic'"><label>Claude model</label><input x-model="cfg.general.claude_model" @input="touch()" placeholder="claude-opus-5-5"></div>
+      <div x-show="cfg.general.llm_provider==='openai'"><label>OpenAI model (must support web search + structured outputs)</label><input x-model="cfg.general.openai_model" @input="touch()" placeholder="gpt-5.5"></div>
+    </div><p class="muted">Applies to everything: topic research, posts, quizzes, notes, video scripts, memory-trick review and the daily newspaper. Add the matching API key under “Keys &amp; bot”.</p></div>
     <div class="card"><h3>Brand</h3><div class="grid">
       <div><label>Brand name</label><input x-model="cfg.general.brand_name" @input="touch()"></div>
       <div><label>Handle (@telegram / social)</label><input x-model="cfg.general.brand_handle" @input="touch()"></div>
@@ -292,6 +298,7 @@
     </div></div>
     <div class="card"><h3>Keys &amp; bot</h3><div class="grid">
       <div><label>Anthropic API key</label><input type="password" x-model="cfg.secrets.anthropic_api_key" @input="touch()" placeholder="not set"></div>
+      <div><label>OpenAI API key</label><input type="password" x-model="cfg.secrets.openai_api_key" @input="touch()" placeholder="not set"></div>
       <div><label>Telegram bot token</label><input type="password" x-model="cfg.secrets.telegram_bot_token" @input="touch()" placeholder="not set"></div>
       <div><label>ElevenLabs API key</label><input type="password" x-model="cfg.secrets.elevenlabs_api_key" @input="touch()" placeholder="not set"></div>
       <div><label>Bot admin user IDs (comma separated)</label><input :value="cfg.general.telegram_admin_ids.join(', ')" @change="cfg.general.telegram_admin_ids = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div>
@@ -389,7 +396,9 @@ function app() {
     warnings() {
       const w = [];
       if (!this.cfg) return w;
-      if (!this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings – nothing can be generated without it.');
+      const openai = this.cfg.general.llm_provider === 'openai';
+      if (openai && !this.status.openai_key && !this.cfg.secrets.openai_api_key) w.push('AI provider is OpenAI: add your OpenAI API key in Settings – nothing can be generated without it.');
+      if (!openai && !this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings (or switch the AI provider to OpenAI) – nothing can be generated without it.');
       if (!this.cfg.secrets.telegram_bot_token) w.push('Add a Telegram bot token in Settings to post to Telegram.');
       if (!this.cfg.channels.some(c => c.enabled)) w.push('No channels are enabled.');
       if (!this.cfg.exams.some(e => e.enabled)) w.push('No exams are enabled.');

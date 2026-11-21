@@ -1,12 +1,13 @@
-"""Claude calls: web research, then structured content generation."""
+"""AI calls: web research, then structured content generation.
+
+Provider-neutral: the actual API calls live in providers.py (Anthropic or OpenAI,
+selected with LLM_PROVIDER or in the admin panel).
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import date
-
-import anthropic
 
 from .config import Exam, settings
 from typing import Literal
@@ -17,10 +18,8 @@ from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage, Mnemonic, mnemo
 
 log = logging.getLogger(__name__)
 
-# Server-side fallback: if a safety classifier declines (false positives happen,
-# e.g. on law / medicine topics), the API re-runs the request on a recommended
-# fallback model inside the same call instead of failing the run.
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
+from . import providers
+from .providers import ContentRefused, Research  # noqa: F401  (re-exported)
 
 LANG_RULES = {
     "hi": "Write ALL learner-facing text in Hindi (Devanagari script). Keep standard technical terms, formulas, section numbers and proper nouns as commonly written in Hindi-medium exam material.",
@@ -46,32 +45,6 @@ class MnemonicReview(BaseModel):
     score: int = Field(description="Memorability of the ORIGINAL draft, 1-10, judged as a student hearing it once.")
     problems: list[str] = Field(description="Concrete problems with the draft (empty if none).")
     improved: Mnemonic | None = Field(default=None, description="The final trick for 'keep' (unchanged) or 'rewrite' (new); null for 'drop'.")
-
-
-class ContentRefused(RuntimeError):
-    pass
-
-
-@dataclass
-class Research:
-    notes: str
-    sources: list[dict] = field(default_factory=list)
-
-
-_client: anthropic.Anthropic | None = None
-
-
-def client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(max_retries=4)
-    return _client
-
-
-def _check_refusal(resp) -> None:
-    if resp.stop_reason == "refusal":
-        details = getattr(resp, "stop_details", None)
-        raise ContentRefused(f"Claude declined this request: {getattr(details, 'category', None)} {getattr(details, 'explanation', '')}")
 
 
 def research_topic(exam: Exam, subject: str, seed_topic: str, content_type: str, avoid: list[str]) -> Research:
@@ -103,8 +76,7 @@ PREVIOUS-YEAR QUESTIONS: list (or "none found")
 COMMON MISTAKES: bullet list
 SOURCES: list of "title - url" you actually relied on"""
 
-    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": settings.max_web_searches}]
-    return web_research(prompt, tools)
+    return web_research(prompt, settings.max_web_searches)
 
 
 def generate_package(exam: Exam, subject: str, content_type: str, research: Research, video_style: str = "concept_explainer") -> ContentPackage:
@@ -139,22 +111,7 @@ SOURCES FOUND
 
 Create the complete content package for this topic."""
 
-    resp = client().beta.messages.parse(
-        model=settings.claude_model,
-        max_tokens=32000,
-        betas=[FALLBACK_BETA],
-        fallbacks="default",
-        output_config={"effort": settings.generation_effort},
-        system=system,
-        messages=[{"role": "user", "content": user}],
-        output_format=ContentPackage,
-    )
-    _check_refusal(resp)
-    if resp.stop_reason == "max_tokens":
-        raise RuntimeError("Generation hit max_tokens; output truncated")
-    pkg = resp.parsed_output
-    if pkg is None:
-        raise RuntimeError("Generation returned no structured output")
+    pkg = structured(system, user, ContentPackage, max_tokens=32000)
     pkg.content_type = content_type  # type: ignore[assignment]
     pkg.short.style = video_style
     if settings.mnemonic_review and (pkg.mnemonic is not None or content_type == "mnemonic_trick"):
@@ -214,19 +171,7 @@ Does each cue clearly point to its fact, in order, with nothing missing or extra
 - 'keep' only if it scores 8+ and passes every check (return it unchanged in 'improved').
 - Otherwise 'rewrite': think of three different tricks and return the best one in 'improved'.
 - 'drop' if the facts have nothing worth a trick (no list/sequence/numbers/confusable pair)."""
-    resp = client().beta.messages.parse(
-        model=settings.claude_model,
-        max_tokens=8000,
-        betas=[FALLBACK_BETA],
-        fallbacks="default",
-        output_config={"effort": settings.generation_effort},
-        messages=[{"role": "user", "content": prompt}],
-        output_format=MnemonicReview,
-    )
-    _check_refusal(resp)
-    review = resp.parsed_output
-    if review is None:
-        raise RuntimeError("mnemonic review returned no output")
+    review = structured("You review memory tricks for exam students.", prompt, MnemonicReview, max_tokens=8000)
     log.info("mnemonic review: %s (draft score %s) %s", review.verdict, review.score, review.problems)
     final = review.improved if review.verdict != "drop" else None
     if final is not None and mnemonic_issues(final):
@@ -234,68 +179,11 @@ Does each cue clearly point to its fact, in order, with nothing missing or extra
         return None
     return final
 
-def web_research(prompt: str, tools: list[dict]) -> Research:
-    """Run a web-search research turn (handling pause_turn) and collect text + cited sources."""
-    messages: list[dict] = [{"role": "user", "content": prompt}]
-    sources: dict[str, str] = {}
-    text_parts: list[str] = []
-
-    for _ in range(6):  # pause_turn continuations
-        with client().beta.messages.stream(
-            model=settings.claude_model,
-            max_tokens=32000,
-            betas=[FALLBACK_BETA],
-            fallbacks="default",
-            output_config={"effort": settings.research_effort},
-            tools=tools,
-            messages=messages,
-        ) as stream:
-            resp = stream.get_final_message()
-        _check_refusal(resp)
-
-        for block in resp.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-                for c in getattr(block, "citations", None) or []:
-                    url = getattr(c, "url", None)
-                    if url:
-                        sources.setdefault(url, getattr(c, "title", "") or url)
-            elif block.type == "web_search_tool_result":
-                results = block.content
-                if isinstance(results, list):  # an error result is a single object
-                    for r in results:
-                        if getattr(r, "url", None):
-                            sources.setdefault(r.url, getattr(r, "title", "") or r.url)
-
-        if resp.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": resp.content})
-            continue
-        break
-
-    notes = "".join(text_parts).strip()
-    if not notes:
-        raise RuntimeError("Research step returned no text")
-    log.info("research done: %d chars, %d sources", len(notes), len(sources))
-    return Research(notes=notes, sources=[{"title": t, "url": u} for u, t in sources.items()])
+def web_research(prompt: str, max_searches: int) -> Research:
+    """Web-search research turn with cited sources (current provider)."""
+    return providers.get().web_research(prompt, max_searches)
 
 
 def structured(system: str, user: str, model, max_tokens: int = 32000, effort: str | None = None):
-    """One structured-output call returning a validated pydantic object (streams for long outputs)."""
-    with client().beta.messages.stream(
-        model=settings.claude_model,
-        max_tokens=max_tokens,
-        betas=[FALLBACK_BETA],
-        fallbacks="default",
-        output_config={"effort": effort or settings.generation_effort},
-        system=system,
-        messages=[{"role": "user", "content": user}],
-        output_format=model,
-    ) as stream:
-        resp = stream.get_final_message()
-    _check_refusal(resp)
-    if resp.stop_reason == "max_tokens":
-        raise RuntimeError("output truncated (max_tokens)")
-    out = resp.parsed_output
-    if out is None:
-        raise RuntimeError("no structured output returned")
-    return out
+    """One structured-output call returning a validated pydantic object (current provider)."""
+    return providers.get().structured(system, user, model, max_tokens=max_tokens, effort=effort)

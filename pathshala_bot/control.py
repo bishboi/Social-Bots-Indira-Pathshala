@@ -23,7 +23,7 @@ from .models import CONTENT_TYPES, VIDEO_STYLES
 Language = Literal["hi", "en", "hinglish"]
 Platform = Literal["telegram", "youtube", "instagram"]
 OUTPUTS = ("card", "questions", "pdf", "short")  # what a content run produces / posts
-SECRET_FIELDS = {"anthropic_api_key", "telegram_bot_token", "elevenlabs_api_key", "client_secret", "refresh_token", "access_token"}
+SECRET_FIELDS = {"anthropic_api_key", "openai_api_key", "telegram_bot_token", "elevenlabs_api_key", "client_secret", "refresh_token", "access_token"}
 
 
 def _id() -> str:
@@ -125,6 +125,9 @@ class Schedule(BaseModel):
 
 
 class General(BaseModel):
+    llm_provider: Literal["anthropic", "openai"] = "anthropic"
+    claude_model: str = "claude-opus-5-5"
+    openai_model: str = "gpt-5.5"
     brand_name: str = "Indira Pathshala"
     brand_handle: str = "@indirapathshala"
     copyright_owner: str = ""
@@ -141,6 +144,7 @@ class General(BaseModel):
 
 class Secrets(BaseModel):
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
     telegram_bot_token: str = ""
     elevenlabs_api_key: str = ""
 
@@ -176,12 +180,15 @@ def control_path() -> Path:
 def _seed_from_env() -> ControlConfig:
     cfg = ControlConfig()
     g = cfg.general
+    g.llm_provider = "openai" if settings.llm_provider == "openai" else "anthropic"
+    g.claude_model, g.openai_model = settings.claude_model, settings.openai_model
     g.brand_name, g.brand_handle = settings.brand_name, settings.brand_handle
     g.copyright_owner, g.timezone = settings.copyright_owner, settings.post_timezone
     g.tts_provider, g.mnemonic_review, g.pdf_watermark = settings.tts_provider, settings.mnemonic_review, settings.pdf_watermark  # type: ignore[assignment]
     g.telegram_admin_ids = list(settings.telegram_admin_ids)
     cfg.secrets = Secrets(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         telegram_bot_token=settings.telegram_bot_token,
         elevenlabs_api_key=settings.elevenlabs_api_key,
     )
@@ -243,6 +250,8 @@ def apply(cfg: ControlConfig) -> None:
         "brand_name": g.brand_name, "brand_handle": g.brand_handle, "copyright_owner": g.copyright_owner,
         "post_timezone": g.timezone, "tts_provider": g.tts_provider, "mnemonic_review": g.mnemonic_review,
         "pdf_watermark": g.pdf_watermark, "telegram_admin_ids": list(g.telegram_admin_ids),
+        "llm_provider": g.llm_provider, "claude_model": g.claude_model.strip() or settings.claude_model,
+        "openai_model": g.openai_model.strip() or settings.openai_model,
         "akhbar_title_hi": g.akhbar_title_hi, "akhbar_title_en": g.akhbar_title_en, "akhbar_articles": g.akhbar_articles,
     }.items():
         object.__setattr__(settings, k, v)
@@ -250,11 +259,17 @@ def apply(cfg: ControlConfig) -> None:
         object.__setattr__(settings, "telegram_bot_token", s.telegram_bot_token)
     if s.elevenlabs_api_key:
         object.__setattr__(settings, "elevenlabs_api_key", s.elevenlabs_api_key)
-    if s.anthropic_api_key and os.environ.get("ANTHROPIC_API_KEY") != s.anthropic_api_key:
-        os.environ["ANTHROPIC_API_KEY"] = s.anthropic_api_key
-        from . import llm
+    from . import providers
 
-        llm._client = None  # rebuild with the new key
+    changed = False
+    for key, env in (("anthropic_api_key", "ANTHROPIC_API_KEY"), ("openai_api_key", "OPENAI_API_KEY")):
+        val = getattr(s, key)
+        if val and os.environ.get(env) != val:
+            os.environ[env] = val
+            changed = True
+    if changed:
+        providers.reset()  # rebuild clients with the new key
+    # switching provider or model needs no rebuild: providers read settings on every call
 
 
 # ---------------------------------------------------------------- exams & channels

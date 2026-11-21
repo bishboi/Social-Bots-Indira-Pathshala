@@ -81,7 +81,15 @@ class ComparisonRow(BaseModel):
     right: str
 
 
+def _no_schema_defaults(schema: dict) -> None:
+    """OpenAI strict structured outputs don't accept 'default'; Python still applies it when loading."""
+    for prop in schema.get("properties", {}).values():
+        prop.pop("default", None)
+
+
 class Scene(BaseModel):
+    model_config = {"json_schema_extra": _no_schema_defaults}
+
     kind: SceneKind
     heading: str = Field(description="On-screen heading, max 6 words.")
     body: str = Field(default="", description="Optional on-screen text, max 25 words (for quiz: the question).")
