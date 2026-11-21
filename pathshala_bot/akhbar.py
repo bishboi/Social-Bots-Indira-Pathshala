@@ -131,6 +131,42 @@ class NewsArticle(BaseModel):
     static_link: str | None = Field(default=None, description="Related static GK fact worth revising, or null.")
     importance: int = Field(description="1-5 relevance for this edition's exams (5 = very likely to be asked).")
     sources: list[Source] = Field(description="Sources used for this story (from the research notes). Never empty.")
+    image_topic: str | None = Field(
+        default=None,
+        description="Exact English Wikipedia article title whose lead photo genuinely illustrates this story: the place, monument, "
+        "institution, river, spacecraft or the office-holder at the centre of it (e.g. 'Hawa Mahal', 'Reserve Bank of India'). Null if none fits.",
+    )
+
+
+# Newspaper sections (front page first, then these in order); category -> section
+SECTIONS = [
+    ("state", ("राज्य", "State"), {"state"}),
+    ("nation", ("देश", "Nation"), {"national", "polity", "schemes", "defence"}),
+    ("exam", ("परीक्षा व भर्ती", "Exams & Jobs"), {"exam_notice"}),
+    ("economy", ("अर्थव्यवस्था", "Economy"), {"economy"}),
+    ("world", ("विदेश", "World"), {"international"}),
+    ("science", ("विज्ञान व पर्यावरण", "Science & Environment"), {"science_tech", "environment"}),
+    ("people", ("पुरस्कार व नियुक्तियाँ", "Awards & Appointments"), {"awards_appointments"}),
+    ("sports", ("खेल", "Sports"), {"sports"}),
+    ("misc", ("विविध", "Miscellany"), {"other"}),
+]
+FRONT_PAGE_STORIES = 4  # lead + 3
+
+
+def layout(articles: list) -> tuple[list[tuple[int, object]], list[tuple[str, list[tuple[int, object]]]]]:
+    """Split ranked articles into the front page and the inside sections (keeping their index for anchors)."""
+    numbered = list(enumerate(articles))
+    front, rest = numbered[:FRONT_PAGE_STORIES], numbered[FRONT_PAGE_STORIES:]
+    sections = []
+    for key, _, cats in SECTIONS:
+        items = [(i, a) for i, a in rest if a.category in cats]
+        if items:
+            sections.append((key, items))
+    return front, sections
+
+
+def section_label(key: str, hi: bool) -> str:
+    return next(lbl for k, lbl, _ in SECTIONS if k == key)[0 if hi else 1]
 
 
 class AkhbarEdition(BaseModel):
@@ -208,6 +244,8 @@ def write_edition(desk: Desk, day: date, research) -> AkhbarEdition:
 - Use only facts from the research notes. Never invent numbers, names, quotes or dates. If a detail is unclear, leave it out.
 - Write like a quality newspaper: neutral, clear, short sentences, no opinions.
 - Every article must have a 'date' from the notes and at least one source URL from the notes.
+- Give the lead story (and other stories where a real photo helps) an 'image_topic' - only the place, monument,
+  institution or office-holder the story is about. Photos are fetched from Wikimedia Commons, so never describe a photo.
 - Use category 'state' for {desk.region} news{' (there is none in the national edition)' if desk.central else ''}.
 - Order articles by importance for these readers. Quiz questions must be answerable from today's articles, with exactly 4 options."""
     user = f"""Edition date: {day.isoformat()}
@@ -252,7 +290,27 @@ def check_edition(ed: AkhbarEdition, day: date) -> list[str]:
     return notes
 
 
-def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, title: str) -> Path:
+def fetch_photos(ed: AkhbarEdition, dest: Path, limit: int = 4) -> dict[int, dict]:
+    """Freely licensed lead photos for up to `limit` stories (most important first)."""
+    from . import resources
+
+    photos: dict[int, dict] = {}
+    for i, a in enumerate(ed.articles):
+        if len(photos) >= limit:
+            break
+        if not a.image_topic:
+            continue
+        try:
+            media = resources.fetch_image(a.image_topic, dest, width=1200)
+        except Exception:
+            log.exception("photo fetch failed for %s", a.image_topic)
+            media = None
+        if media:
+            photos[i] = {"url": media.path.resolve().as_uri(), "credit": media.credit.split(": ", 1)[-1]}
+    return photos
+
+
+def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, title: str, photos: dict | None = None) -> Path:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from weasyprint import HTML
 
@@ -270,8 +328,12 @@ def render(ed: AkhbarEdition, desk: Desk, day: date, issue_no: int, out: Path, t
     months_hi = ["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"]
     days_hi = ["सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार", "रविवार"]
     date_str = f"{days_hi[day.weekday()]}, {day.day} {months_hi[day.month - 1]} {day.year}" if hi else day.strftime("%A, %d %B %Y")
+    front, sections = layout(ed.articles)
     html = env.get_template("akhbar.html").render(
         ed=ed, desk=desk, edition_label=desk.label(), title=title, date_str=date_str, issue_no=issue_no, hi=hi,
+        front=front, sections=sections, section_label=lambda k: section_label(k, hi), photos=photos or {},
+        masthead_font=face("RozhaOne-Regular.ttf", ("deva", "bold")) if hi else face("UnifrakturMaguntia-Regular.ttf", ("latin", "bold")),
+        motto="शिक्षा | सम्मान | अवसर",
         cat=lambda c: CATEGORY_LABELS.get(c, CATEGORY_LABELS["other"])[0 if hi else 1],
         serif_regular=face("NotoSerifDevanagari-Regular.ttf", ("deva", "regular")),
         serif_bold=face("NotoSerifDevanagari-Bold.ttf", ("deva", "bold")),
@@ -333,7 +395,8 @@ def run(desk: Desk, channels: list | None = None, questions: bool = True, day: d
         result.edition = ed
         (run_dir / "akhbar.json").write_text(ed.model_dump_json(indent=2), encoding="utf-8")
         issue_no = history.akhbar_count(hkey) + 1
-        result.pdf = render(ed, desk, day, issue_no, run_dir / f"akhbar_{desk.key}_{day.isoformat()}.pdf", title)
+        photos = fetch_photos(ed, run_dir / "media")
+        result.pdf = render(ed, desk, day, issue_no, run_dir / f"akhbar_{desk.key}_{day.isoformat()}.pdf", title, photos)
     except Exception:
         log.exception("akhbar build failed")
         result.errors["build"] = traceback.format_exc()

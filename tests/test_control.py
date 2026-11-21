@@ -264,3 +264,28 @@ def test_akhbar_schedule_runs_each_edition(ctl, monkeypatch):
     monkeypatch.setattr(akhbar, "run", lambda desk, channels=None, questions=True: desks.append((desk.region, desk.language, len(channels))) or R())
     scheduler.execute(s.id)
     assert sorted(desks) == [("Rajasthan", "hi", 1), ("central", "hi", 1)]
+
+
+def test_newspaper_layout_sections():
+    from pathshala_bot.akhbar import FRONT_PAGE_STORIES, layout
+
+    ed = _edition()
+    front, sections = layout(ed.articles)
+    assert [i for i, _ in front] == list(range(FRONT_PAGE_STORIES))
+    placed = [i for _, items in sections for i, _ in items]
+    assert sorted(placed) == list(range(FRONT_PAGE_STORIES, len(ed.articles)))  # every story appears exactly once
+    keys = [k for k, _ in sections]
+    assert keys.index("world") < keys.index("sports")  # section order follows a newspaper
+
+
+@pytest.mark.parametrize("region,lang,title", [("Rajasthan", "hi", "पाठशाला समाचार"), ("central", "en", "Pathshala Times")])
+def test_newspaper_renders_each_edition(ctl, tmp_path, region, lang, title):
+    pytest.importorskip("weasyprint")
+    from datetime import date
+
+    from pathshala_bot import akhbar
+
+    out = akhbar.render(_edition(), akhbar.Desk(region, lang), date(2026, 11, 21), 3, tmp_path / "p.pdf", title, photos={})
+    assert out.read_bytes()[:4] == b"%PDF"
+    html = out.with_suffix(".html").read_text(encoding="utf-8")
+    assert akhbar.Desk(region, lang).label() in html and "target-counter" in html

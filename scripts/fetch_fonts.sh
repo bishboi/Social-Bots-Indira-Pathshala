@@ -20,3 +20,6 @@ fetch "Poppins" Poppins 700 Bold
 # Serif face for the daily current-affairs newspaper (Akhbar)
 fetch "Noto+Serif+Devanagari" NotoSerifDevanagari 400 Regular
 fetch "Noto+Serif+Devanagari" NotoSerifDevanagari 700 Bold
+# Newspaper mastheads: Rozha One (Devanagari display) and UnifrakturMaguntia (blackletter, English)
+fetch "Rozha+One" RozhaOne 400 Regular
+fetch "UnifrakturMaguntia" UnifrakturMaguntia 400 Regular

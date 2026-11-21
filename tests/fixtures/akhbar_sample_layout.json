@@ -25,7 +25,8 @@
           "title": "Sample source",
           "url": "https://example.org/sample-1"
         }
-      ]
+      ],
+      "image_topic": "Hawa Mahal"
     },
     {
       "headline": "नमूना समाचार 2: लेआउट जाँचने के लिए उदाहरण शीर्षक",
@@ -75,7 +76,8 @@
           "title": "Sample source",
           "url": "https://example.org/sample-3"
         }
-      ]
+      ],
+      "image_topic": "Sambhar Salt Lake"
     },
     {
       "headline": "नमूना समाचार 4: लेआउट जाँचने के लिए उदाहरण शीर्षक",
