@@ -50,6 +50,30 @@ OPENAI_MODEL=gpt-5.5         # any OpenAI model with the web_search tool + struc
 
 You only need the key for the provider you use. Switching takes effect on the next run, with no restart.
 
+## Database (Supabase)
+
+On a server, keep the app's data in **Supabase** so nothing is lost on restarts or redeploys. That covers the run history (which prevents repeated topics and headlines), the generated quizzes used by `/quiz`, and every admin-panel setting (channels, exams, schedules, editions and keys).
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. Create the tables: open **SQL Editor**, paste [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. Alternatively, set `SUPABASE_DB_URL` and run `python -m pathshala_bot db-init`.
+3. Add the credentials from **Project Settings → API** to `.env`:
+   ```bash
+   SUPABASE_URL=https://<project>.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=<service_role key>
+   ```
+4. Check the connection:
+   ```bash
+   python -m pathshala_bot db-check
+   ```
+
+| Table | Holds |
+|---|---|
+| `runs` | Every content and newspaper run: exam/edition, topic, status, where it was posted, and the generated content as JSON |
+| `headlines` | Newspaper headlines already used, per edition (so stories aren't repeated within a week) |
+| `app_config` | The admin-panel settings, as one row. It includes your API keys. |
+
+All three tables have **Row Level Security turned on with no policies**, so the public `anon` key can't read anything. The server uses the `service_role` key, a server secret that must never go in a browser or app. On the first start with Supabase, an existing local `output/control.json` is imported automatically. Without Supabase settings the app falls back to local SQLite (`DB_PATH`) and `output/control.json`. The panel header shows which one is in use, and any database error appears on the dashboard. Generated files (PDFs, videos, images) stay in `OUTPUT_DIR`.
+
 ## Admin panel
 
 Start everything with one command: the web panel, the scheduler and the Telegram bot.
@@ -69,7 +93,7 @@ Then open http://localhost:8080 and log in as `admin`. The panel has six tabs:
 | **Newspaper** | Daily current-affairs editions per **state or Central** and **language**, each with its own Telegram channels |
 | **Settings** | Brand, timezone, default language, voice, PDF watermark, newspaper title, and API keys. Keys are stored on the server and only ever shown masked. |
 
-Settings are saved to `output/control.json` (readable only by the server's own user). On the first start that file is seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. The panel uses HTTP Basic auth (`ADMIN_USER` / `ADMIN_PASSWORD`), so put it behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
+Settings are saved to Supabase (`app_config`) when it's configured, otherwise to `output/control.json` (readable only by the server's own user). On the first start they're seeded from your `.env`, so existing setups carry over. Schedules reload as soon as you save. The panel uses HTTP Basic auth (`ADMIN_USER` / `ADMIN_PASSWORD`), so put it behind HTTPS (e.g. a reverse proxy) if you expose it to the internet.
 
 ## Daily current-affairs newspaper (Akhbar)
 

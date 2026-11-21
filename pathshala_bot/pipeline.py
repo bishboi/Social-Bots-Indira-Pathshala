@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import Exam, load_exams, settings
 from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage
-from .store import History
+from .store import get_history
 
 log = logging.getLogger(__name__)
 
@@ -235,7 +235,7 @@ def run(
     exams = exams or load_exams()
     outputs = set(outputs or ("card", "questions", "pdf", "short"))
     make_video = make_video and "short" in outputs
-    history = History(settings.db_path)
+    history = get_history()
     platforms = set(platforms or ())
 
     if from_json:
@@ -290,7 +290,7 @@ def run(
     return result
 
 
-def _finish(result: RunResult, history: History, subject: str, topic: str | None, content_type: str) -> None:
+def _finish(result: RunResult, history, subject: str, topic: str | None, content_type: str) -> None:
     manifest = {
         "exam": result.exam.id,
         "subject": subject,
@@ -304,4 +304,5 @@ def _finish(result: RunResult, history: History, subject: str, topic: str | None
     }
     (result.run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     status = "ok" if result.ok and not [k for k in result.errors if not result.errors[k].startswith("skipped")] else ("partial" if result.ok else "failed")
-    history.record(result.exam.id, subject, topic or "", content_type, str(result.run_dir), status, result.published)
+    history.record(result.exam.id, subject, topic or "", content_type, str(result.run_dir), status, result.published,
+                   content=result.package.model_dump(mode="json") if result.package else None)

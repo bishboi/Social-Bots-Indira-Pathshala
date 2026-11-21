@@ -12,3 +12,4 @@ manim>=0.19
 edge-tts>=7.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# optional, only for `python -m pathshala_bot db-init`:  pip install "psycopg[binary]>=3.1"

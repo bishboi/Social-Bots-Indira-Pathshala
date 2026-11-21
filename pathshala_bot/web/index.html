@@ -60,6 +60,7 @@
 <header>
   <div class="bar">
     <div class="brand" x-text="(cfg?.general?.brand_name || 'Pathshala') + ' · Control'"></div>
+    <span class="pill" :class="status.db_error ? 'bad' : ''" x-show="status.database" x-text="'DB: ' + (status.database === 'supabase' ? 'Supabase' : 'local SQLite')"></span>
     <span class="pill" :class="status.worker?.running ? 'warn' : 'ok'" x-text="status.worker?.running ? 'Running: ' + status.worker.running.schedule : 'Idle'"></span>
     <span class="muted" x-show="dirty">Unsaved changes</span>
     <button class="btn primary" :disabled="!dirty || saving" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
@@ -396,6 +397,7 @@ function app() {
     warnings() {
       const w = [];
       if (!this.cfg) return w;
+      if (this.status.db_error) w.push('Database error: ' + this.status.db_error);
       const openai = this.cfg.general.llm_provider === 'openai';
       if (openai && !this.status.openai_key && !this.cfg.secrets.openai_api_key) w.push('AI provider is OpenAI: add your OpenAI API key in Settings – nothing can be generated without it.');
       if (!openai && !this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings (or switch the AI provider to OpenAI) – nothing can be generated without it.');

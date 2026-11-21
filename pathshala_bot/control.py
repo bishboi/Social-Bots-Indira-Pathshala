@@ -208,11 +208,54 @@ def _seed_from_env() -> ControlConfig:
     return cfg
 
 
+def storage() -> str:
+    """Where panel settings live: 'supabase' (app_config table) or 'file' (control.json)."""
+    from .supabase_db import configured
+
+    return "supabase" if configured() else "file"
+
+
+def _read_raw() -> tuple[dict | None, bool]:
+    """(stored settings or None, whether they still need saving to the database)."""
+    p = control_path()
+    local = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    if storage() == "supabase":
+        from .supabase_db import Supabase
+
+        rows = Supabase().select("app_config", {"select": "data", "id": "eq.1"})
+        if rows:
+            return rows[0]["data"], False
+        return local, local is not None  # first start on Supabase: import an existing control.json
+    return local, False
+
+
+def _write_raw(cfg: ControlConfig) -> None:
+    if storage() == "supabase":
+        from datetime import datetime, timezone
+
+        from .supabase_db import Supabase
+
+        Supabase().upsert("app_config", {"id": 1, "data": cfg.model_dump(mode="json"),
+                                         "updated_at": datetime.now(timezone.utc).isoformat()})
+        return
+    p = control_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    tmp.replace(p)
+    try:
+        os.chmod(p, 0o600)  # contains secrets
+    except OSError:
+        pass
+
+
 def load() -> ControlConfig:
     with _lock:
-        p = control_path()
-        if p.exists():
-            cfg = ControlConfig.model_validate_json(p.read_text(encoding="utf-8"))
+        raw, needs_import = _read_raw()
+        if raw is not None:
+            cfg = ControlConfig.model_validate(raw)
+            if needs_import:
+                _write_raw(cfg)
         else:
             cfg = _seed_from_env()
             save(cfg)
@@ -231,15 +274,7 @@ def load() -> ControlConfig:
 
 def save(cfg: ControlConfig) -> None:
     with _lock:
-        p = control_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
-        tmp.replace(p)
-        try:
-            os.chmod(p, 0o600)  # contains secrets
-        except OSError:
-            pass
+        _write_raw(cfg)
     apply(cfg)
 
 

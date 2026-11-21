@@ -22,7 +22,8 @@ from fastapi.staticfiles import StaticFiles
 from .. import control
 from ..config import settings
 from ..scheduler import Scheduler
-from ..store import History
+from ..supabase_db import configured as supabase_configured
+from ..store import get_history
 
 log = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent
@@ -86,14 +87,21 @@ def create_app(with_bot: bool = True) -> FastAPI:
 
     @app.get("/api/status", dependencies=guard)
     def status():
-        runs = History(settings.db_path).runs(40)
+        try:
+            runs = get_history().runs(40)
+        except Exception as e:  # surface database problems on the dashboard instead of a 500
+            log.exception("history unavailable")
+            runs, db_error = [], str(e)[:500]
+        else:
+            db_error = None
         for r in runs:
             d = Path(r.get("run_dir") or "")
             r["run"] = d.name
             r["files"] = sorted(p.name for p in d.glob("*") if p.suffix in (".pdf", ".mp4", ".png")) if d.is_dir() else []
         return {"jobs": sched.jobs(), "worker": sched.state(), "runs": runs, "bot": bool(state["bot"]),
                 "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")), "openai_key": bool(os.getenv("OPENAI_API_KEY")),
-                "provider": settings.llm_provider}
+                "provider": settings.llm_provider, "database": "supabase" if supabase_configured() else "sqlite",
+                "db_error": db_error}
 
     @app.post("/api/schedules/{sid}/run", dependencies=guard)
     async def run_now(sid: str, dry: bool = False):

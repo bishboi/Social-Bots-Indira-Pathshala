@@ -28,7 +28,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from . import pipeline
 from .config import load_exams, settings
 from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage
-from .store import History
+from .store import get_history
 
 log = logging.getLogger(__name__)
 _run_lock = asyncio.Lock()
@@ -113,12 +113,15 @@ async def generate(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def quiz(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     exam, _, _ = _parse_args(ctx.args)
-    pattern = f"*_{exam}_*/content.json" if exam else "*/content.json"
-    files = sorted(settings.output_dir.glob(pattern))
     questions = []
-    for f in files[-50:]:
+    try:
+        stored = await asyncio.to_thread(get_history().recent_contents, exam, 50)
+    except Exception:
+        log.exception("could not read past content")
+        stored = []
+    for data in stored:
         try:
-            pkg = ContentPackage.model_validate_json(f.read_text(encoding="utf-8"))
+            pkg = ContentPackage.model_validate(data)
             questions += [(pkg, q) for q in pkg.mcqs]
         except Exception:
             continue
@@ -141,7 +144,7 @@ async def history_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_admin(update):
         await update.message.reply_text("Admins only.")
         return
-    rows = History(settings.db_path).last_runs(10)
+    rows = get_history().last_runs(10)
     text = "\n".join(f"{r[0][:16]} · {r[1]} · {r[3]} · {r[4]}\n   {r[2]}" for r in rows) or "No runs yet."
     await update.message.reply_text(text)
 

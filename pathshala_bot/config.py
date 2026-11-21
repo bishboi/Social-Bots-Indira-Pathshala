@@ -89,6 +89,10 @@ class Settings:
     # Storage
     output_dir: Path = field(default_factory=lambda: Path(_env("OUTPUT_DIR", str(PROJECT_DIR / "output"))))
     db_path: Path = field(default_factory=lambda: Path(_env("DB_PATH", str(PROJECT_DIR / "output" / "history.sqlite3"))))
+    # Supabase (database for run history + admin-panel settings). Empty = local SQLite + control.json.
+    supabase_url: str = field(default_factory=lambda: _env("SUPABASE_URL"))
+    supabase_key: str = field(default_factory=lambda: _env("SUPABASE_SERVICE_ROLE_KEY") or _env("SUPABASE_KEY"))
+    supabase_db_url: str = field(default_factory=lambda: _env("SUPABASE_DB_URL"))  # only for `db-init`
     fonts_dir: Path = field(default_factory=lambda: Path(_env("FONTS_DIR", str(PROJECT_DIR / "assets" / "fonts"))))
 
     @property

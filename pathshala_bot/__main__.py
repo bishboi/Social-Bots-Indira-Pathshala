@@ -4,6 +4,7 @@
   python -m pathshala_bot run --from-json output/<run>/content.json --publish telegram   # re-render / re-post
   python -m pathshala_bot serve        # admin UI + scheduler + Telegram bot (set ADMIN_PASSWORD)
   python -m pathshala_bot akhbar --region Rajasthan --language hi [--publish]   # daily current-affairs paper
+  python -m pathshala_bot db-check     # check the Supabase database (or local SQLite)
   python -m pathshala_bot bot          # bot only, legacy .env schedule
   python -m pathshala_bot exams        # list exams
 """
@@ -51,6 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     ak.add_argument("--chat", help="post to this Telegram chat instead")
     ak.add_argument("--from-json", type=Path, help="render an existing akhbar.json (no AI calls)")
 
+    sub.add_parser("db-check", help="check the database (Supabase or local SQLite)")
+    sub.add_parser("db-init", help="create the Supabase tables (needs SUPABASE_DB_URL), same as running supabase/schema.sql")
+
     sub.add_parser("bot", help="Telegram bot only, with the legacy POST_TIMES schedule")
     sub.add_parser("exams", help="list configured exams")
 
@@ -97,6 +101,28 @@ def main(argv: list[str] | None = None) -> int:
         res = akhbar.run(ed.desk(), channels=chans, from_json=a.from_json)
         print("\n" + res.summary())
         return 0 if res.ok else 1
+    if a.cmd in ("db-check", "db-init"):
+        from . import supabase_db
+
+        if not supabase_db.configured():
+            from .config import settings
+
+            print(f"Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY empty).\n"
+                  f"Using local SQLite at {settings.db_path} and settings file output/control.json.")
+            return 0 if a.cmd == "db-check" else 1
+        if a.cmd == "db-init":
+            try:
+                supabase_db.init_schema()
+            except supabase_db.SupabaseError as e:
+                print(f"db-init failed: {e}")
+                return 1
+            print("Schema applied.")
+        status = supabase_db.Supabase().check()
+        for table, st in status.items():
+            print(f"  {table:11} {'OK' if st == 'ok' else 'ERROR: ' + st}")
+        ok = all(v == "ok" for v in status.values())
+        print("Supabase is ready." if ok else "Fix the errors above (usually: run supabase/schema.sql in the SQL editor).")
+        return 0 if ok else 1
     if a.cmd == "bot":
         from .bot import main as bot_main
 

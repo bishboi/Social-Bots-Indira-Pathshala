@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from .config import settings
 from .models import MCQ, Source
-from .store import History
+from .store import get_history
 
 log = logging.getLogger(__name__)
 
@@ -378,7 +378,7 @@ def run(desk: Desk, channels: list | None = None, questions: bool = True, day: d
     from . import llm  # noqa: F401  (imported for side effects in tests)
 
     day = day or today()
-    history = History(settings.db_path)
+    history = get_history()
     run_dir = settings.output_dir / f"{day.strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}_akhbar_{desk.key}"
     run_dir.mkdir(parents=True, exist_ok=True)
     result = AkhbarResult(run_dir, desk)
@@ -426,7 +426,8 @@ def run(desk: Desk, channels: list | None = None, questions: bool = True, day: d
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     status = "ok" if result.ok and not result.errors else ("partial" if result.ok else "failed")
     lead = result.edition.articles[0].headline if result.edition and result.edition.articles else ""
-    history.record(hkey, desk.label(), lead, "akhbar", str(run_dir), status, result.published)
+    history.record(hkey, desk.label(), lead, "akhbar", str(run_dir), status, result.published,
+                   content=result.edition.model_dump(mode="json") if result.edition else None)
     if result.edition:
         history.add_headlines(hkey, day.isoformat(), [a.headline for a in result.edition.articles])
     return result
