@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ContentType = Literal["pyq_quiz", "concept_explainer", "cheatsheet", "formula_sheet", "mnemonic_trick", "current_affairs"]
 
@@ -115,6 +115,22 @@ class NoteSection(BaseModel):
     bullets: list[str] = Field(description="0-8 bullet points.")
 
 
+class MnemonicCue(BaseModel):
+    cue: str = Field(description="The word or phrase exactly as it appears in the trick, e.g. 'मछली'.")
+    stands_for: str = Field(description="The fact it recalls, e.g. 'मत्स्य संघ (18 मार्च 1948)'.")
+
+
+class Mnemonic(BaseModel):
+    kind: Literal["story", "sentence", "rhyme", "acronym_word", "visual", "number_link", "association"] = Field(
+        description="story/sentence: a short meaningful sentence whose words hint at each item in order; rhyme: a rhyming line; "
+        "acronym_word: the initials form a REAL, pronounceable word; visual: a vivid mental picture; number_link: ties a number/date "
+        "to something familiar; association: links one confusing fact to something already known."
+    )
+    trick: str = Field(description="The trick itself, max 140 characters, in the content language. Must read naturally and be easy to say aloud.")
+    decode: list[MnemonicCue] = Field(description="Every cue in the trick, in order, with exactly what it stands for. Each cue must appear verbatim in 'trick'.")
+    tip: str = Field(description="One line on how to use it in the exam, e.g. which question type it answers.")
+
+
 class Source(BaseModel):
     title: str
     url: str
@@ -131,8 +147,51 @@ class ContentPackage(BaseModel):
     )
     key_points: list[str] = Field(description="5-8 crisp key takeaways.")
     cheatsheet: list[CheatRow] = Field(description="8-16 rows of high-yield facts for quick revision.")
-    mnemonic: str | None = Field(default=None, description="A memory trick if one genuinely helps, else null.")
+    mnemonic: Mnemonic | None = Field(
+        default=None,
+        description="A memory trick ONLY if the topic has a list, sequence, set of dates/numbers or an easily-confused pair worth memorising; else null.",
+    )
     mcqs: list[MCQ] = Field(description="3-5 exam-level multiple choice questions of mixed difficulty.")
     short: ShortVideo
     notes: list[NoteSection] = Field(description="4-7 sections of printable revision notes covering the topic in depth.")
     sources: list[Source] = Field(description="Web sources actually used during research (from the research notes).")
+
+    @field_validator("mnemonic", mode="before")
+    @classmethod
+    def _accept_legacy_string(cls, v):
+        return _legacy_mnemonic(v)
+
+
+def _legacy_mnemonic(v):
+    """Older content.json files stored the trick as a plain string."""
+    if isinstance(v, str):
+        return {"kind": "sentence", "trick": v, "decode": [], "tip": ""} if v.strip() else None
+    return v
+
+
+
+
+def mnemonic_issues(m: Mnemonic | None) -> list[str]:
+    """Mechanical checks a good trick must pass (the review step fixes what fails)."""
+    if m is None:
+        return []
+    problems = []
+    trick = m.trick.strip()
+    if len(trick) > 160:
+        problems.append("trick is too long to say in one breath")
+    if not m.decode:
+        problems.append("no decode: the learner cannot tell what each part stands for")
+    if len(m.decode) == 1 and m.kind in ("story", "sentence", "acronym_word"):
+        problems.append("only one cue - a list trick needs one cue per item")
+    missing = [c.cue for c in m.decode if c.cue.strip() and c.cue.strip() not in trick]
+    if missing:
+        problems.append(f"cues not found in the trick text: {missing}")
+    # letter soup like "म-पू-सं-वृ" or "M-P-S-V": mostly 1-2 character chunks
+    import re
+
+    for run in re.findall(r"(?:[^\s\-–]+\s*[-–]\s*){3,}[^\s\-–]+", trick):
+        parts = [x.strip(' "\'') for x in re.split(r"[-–]", run)]
+        if sum(len(x) <= 3 for x in parts) >= len(parts) * 0.6:
+            problems.append("trick is a string of letters, not words a person can remember")
+            break
+    return problems

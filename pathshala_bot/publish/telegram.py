@@ -92,6 +92,13 @@ def publish(pkg: ContentPackage, exam: Exam, assets: dict[str, Path], chat_id: s
             result["messages"].append(tg.send_photo(chat, assets["card"], f"<b>{safe_html(pkg.title)}</b>")["message_id"])
         result["messages"].append(tg.send_message(chat, caption[:4096])["message_id"])
 
+    m = pkg.mnemonic
+    if m is not None and m.decode:
+        head = "🧠 <b>याद रखने की ट्रिक</b>" if exam.language == "hi" else "🧠 <b>Memory trick</b>"
+        lines = "\n".join(f"▫️ <b>{safe_html(c.cue)}</b> → {safe_html(c.stands_for)}" for c in m.decode)
+        tip = f"\n\n💡 {safe_html(m.tip)}" if m.tip else ""
+        result["messages"].append(tg.send_message(chat, f"{head}\n\n<b>“{safe_html(m.trick)}”</b>\n\n{lines}{tip}"[:4096])["message_id"])
+
     for q in pkg.mcqs:
         result["messages"].append(tg.send_quiz(chat, q.question, q.options, q.correct_index, q.explanation)["message_id"])
         time.sleep(1.2)

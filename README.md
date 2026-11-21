@@ -166,6 +166,24 @@ Admins are the numeric user IDs in `TELEGRAM_ADMIN_IDS`.
 
 Any platform without credentials is skipped and noted in `manifest.json`, so you can start with Telegram only.
 
+## Memory tricks (याद रखने की ट्रिक)
+
+A memory trick is added only when a topic has a list, sequence, dates or easily confused facts to memorise. Each trick has three parts:
+
+- the trick itself: a short sentence, story, rhyme or real word that makes sense when said aloud
+- a **breakdown** saying what each cue word stands for
+- a one-line tip on when to use it in the exam
+
+Example: "मछली पूरब से संग चली, बड़ी होकर संग-बड़ी बनी, सिरोही होते अजमेर पहुँची". Here मछली stands for मत्स्य संघ (मत्स्य means fish), पूरब for पूर्व राजस्थान, and so on through all 7 stages.
+
+Quality checks:
+
+1. **Writing rules:** the AI is given rules plus good and bad examples. Cues must be real words that hint at their fact, never bare letters.
+2. **Automatic check:** rejects letter strings like "म-पू-सं-वृ", a missing breakdown, and cues that don't appear in the trick.
+3. **Review call:** a second Claude call tests the trick against the facts. It keeps it (score 8/10 or more), rewrites it (choosing the best of three alternatives), or drops it. A trick that still fails the checks after the review is left out entirely. To skip the extra call, set `MNEMONIC_REVIEW=false`.
+
+The trick appears in the PDF with its breakdown table, and as its own Telegram message.
+
 ## Adding an exam
 
 Add an entry to `pathshala_bot/exams.yaml` with an `id`, a `language` (`hi`/`en`/`hinglish`), a `weight` and its `subjects` with seed topics. You don't need to change any code.

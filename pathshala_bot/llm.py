@@ -9,7 +9,11 @@ from datetime import date
 import anthropic
 
 from .config import Exam, settings
-from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from .models import CONTENT_TYPES, VIDEO_STYLES, ContentPackage, Mnemonic, mnemonic_issues
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +27,25 @@ LANG_RULES = {
     "en": "Write all learner-facing text in clear Indian English.",
     "hinglish": "Write in simple Hinglish (Hindi in Roman script mixed with English terms), the way popular Indian educators talk. Keep formulas and technical terms in English.",
 }
+
+
+MNEMONIC_RULES = """Memory tricks ("याद रखने की ट्रिक") - only when there is a list, sequence, set of dates/numbers or a confusing pair to memorise:
+- Make a short sentence, story, rhyme or real word that a student can say aloud and picture. It must make sense on its own.
+- Every cue must be a whole, familiar word that *hints at* its item by sound or meaning (e.g. 'मछली' for मत्स्य, because मत्स्य means fish) - not a bare initial letter.
+- One cue per item, in the same order as the facts, and no extra cues. Every cue appears verbatim in the trick.
+- Prefer funny, vivid or local images (chai, cricket, train, family) - absurd is fine, confusing is not.
+- Keep it under ~15 words. Fill 'decode' so a student can check each cue against its fact.
+- Never invent or change a fact to make the trick fit.
+GOOD: "मछली पूरब से संग चली, बड़ी होकर संग-बड़ी बनी, सिरोही होते अजमेर पहुँची" -> मछली = मत्स्य संघ, पूरब = पूर्व राजस्थान, संग = संयुक्त राजस्थान, बड़ी = वृहत् राजस्थान, संग-बड़ी = संयुक्त वृहत् राजस्थान, सिरोही = सिरोही का विलय, अजमेर = अजमेर-मेरवाड़ा (1956).
+GOOD: "OIL RIG" -> Oxidation Is Loss (of electrons), Reduction Is Gain.
+BAD: "म-पू-सं-वृ-मत्स्य-सि-अ" (letter soup - nothing to picture). BAD: "Remember PV = nRT" (restates the fact, no trick)."""
+
+
+class MnemonicReview(BaseModel):
+    verdict: Literal["keep", "rewrite", "drop"]
+    score: int = Field(description="Memorability of the ORIGINAL draft, 1-10, judged as a student hearing it once.")
+    problems: list[str] = Field(description="Concrete problems with the draft (empty if none).")
+    improved: Mnemonic | None = Field(default=None, description="The final trick for 'keep' (unchanged) or 'rewrite' (new); null for 'drop'.")
 
 
 class ContentRefused(RuntimeError):
@@ -138,7 +161,9 @@ Standards:
 - Map scenes: only name real places/districts/rivers with their official English names; coordinates and boundaries come from verified datasets, never from you. Only use map scenes when location genuinely matters.
 - Image scenes: name an English Wikipedia article whose lead photo shows the subject (a fort, monument, person, landform). Only use when a real photo adds value.
 - Formula scenes: valid LaTeX math (no $), symbols explained in 'terms'.
-- Never claim a question is a previous-year question unless the research notes show it is."""
+- Never claim a question is a previous-year question unless the research notes show it is.
+
+{MNEMONIC_RULES}"""
 
     user = f"""Exam: {exam.name} ({exam.short_name})
 Audience: {exam.audience}
@@ -172,6 +197,13 @@ Create the complete content package for this topic."""
         raise RuntimeError("Generation returned no structured output")
     pkg.content_type = content_type  # type: ignore[assignment]
     pkg.short.style = video_style
+    if settings.mnemonic_review and (pkg.mnemonic is not None or content_type == "mnemonic_trick"):
+        try:
+            pkg.mnemonic = review_mnemonic(exam, pkg)
+        except Exception:
+            log.exception("mnemonic review failed; keeping the draft only if it passes the checks")
+            if mnemonic_issues(pkg.mnemonic):
+                pkg.mnemonic = None
     return sanitize(pkg)
 
 
@@ -197,3 +229,47 @@ def sanitize(pkg: ContentPackage) -> ContentPackage:
             sc.kind = "bullets"  # type: ignore[assignment]
     pkg.short.hashtags = [h.lstrip("#").replace(" ", "") for h in pkg.short.hashtags if h.strip()][:15]
     return pkg
+
+
+def review_mnemonic(exam: Exam, pkg: ContentPackage) -> Mnemonic | None:
+    """Second opinion on the memory trick: keep it, rewrite it, or drop it."""
+    facts = "\n".join([f"- {p}" for p in pkg.key_points] + [f"- {r.term}: {r.detail}" for r in pkg.cheatsheet])
+    draft = pkg.mnemonic.model_dump_json(indent=1) if pkg.mnemonic else "(none - create one if the facts contain something worth memorising)"
+    issues = mnemonic_issues(pkg.mnemonic)
+    prompt = f"""You review memory tricks for {exam.name} students. {LANG_RULES.get(exam.language, LANG_RULES['en'])}
+
+TOPIC: {pkg.topic}
+FACTS (the only source of truth):
+{facts}
+
+DRAFT TRICK:
+{draft}
+
+AUTOMATIC CHECKS FAILED: {issues or 'none'}
+
+{MNEMONIC_RULES}
+
+Test the draft like a student who hears it once: Can you say it aloud easily? Does it make sense as a sentence/picture?
+Does each cue clearly point to its fact, in order, with nothing missing or extra? Is every decoded fact exactly right per FACTS?
+- 'keep' only if it scores 8+ and passes every check (return it unchanged in 'improved').
+- Otherwise 'rewrite': think of three different tricks and return the best one in 'improved'.
+- 'drop' if the facts have nothing worth a trick (no list/sequence/numbers/confusable pair)."""
+    resp = client().beta.messages.parse(
+        model=settings.claude_model,
+        max_tokens=8000,
+        betas=[FALLBACK_BETA],
+        fallbacks="default",
+        output_config={"effort": settings.generation_effort},
+        messages=[{"role": "user", "content": prompt}],
+        output_format=MnemonicReview,
+    )
+    _check_refusal(resp)
+    review = resp.parsed_output
+    if review is None:
+        raise RuntimeError("mnemonic review returned no output")
+    log.info("mnemonic review: %s (draft score %s) %s", review.verdict, review.score, review.problems)
+    final = review.improved if review.verdict != "drop" else None
+    if final is not None and mnemonic_issues(final):
+        log.warning("reviewed trick still fails checks %s - dropping it", mnemonic_issues(final))
+        return None
+    return final

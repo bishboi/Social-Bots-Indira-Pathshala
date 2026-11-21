@@ -13,10 +13,10 @@ from . import fonts
 
 LABELS = {
     "hi": dict(key_points="मुख्य बिंदु", mnemonic="याद रखने की ट्रिक", cheatsheet="चीट शीट", term="विषय", detail="तथ्य",
-               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत", map="मानचित्र",
+               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत", map="मानचित्र", cue="संकेत", stands_for="किसके लिए", tip="कैसे काम आएगी",
                rights="सर्वाधिकार सुरक्षित। इस PDF को बेचना, बदलना या बिना अनुमति के दोबारा प्रकाशित करना वर्जित है। निःशुल्क व्यक्तिगत अध्ययन हेतु साझा कर सकते हैं।"),
     "en": dict(key_points="Key Points", mnemonic="Memory Trick", cheatsheet="Cheatsheet", term="Term", detail="Fact",
-               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources", map="Map",
+               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources", map="Map", cue="Cue", stands_for="Stands for", tip="How to use it",
                rights="All rights reserved. Selling, altering or republishing this PDF without permission is prohibited. You may share it free of charge for personal study."),
 }
 

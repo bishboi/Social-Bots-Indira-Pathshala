@@ -101,6 +101,7 @@ def test_telegram_publish_sequence(pkg, exam, tmp_path, monkeypatch):
     res = telegram.publish(pkg, exam, {"card": card, "pdf": pdf_path}, chat_id="@test")
     methods = [c[0] for c in calls]
     assert methods[0] == "sendPhoto"
+    assert methods[1] == "sendMessage" and "ट्रिक" in calls[1][1]["text"] and "मछली" in calls[1][1]["text"]
     assert methods.count("sendPoll") == len(pkg.mcqs)
     assert methods[-1] == "sendDocument"
     poll = next(c[1] for c in calls if c[0] == "sendPoll")
@@ -203,3 +204,43 @@ def test_manim_render_smoke(tmp_path, monkeypatch):
     plan = [{"audio": None, "seconds": 3.0} for _ in p.short.scenes]
     out = video.render_manim(p, load_exams()["rajasthan-si"], plan, tmp_path)
     assert video.duration(out) == pytest.approx(9.0, abs=0.6)
+
+
+# ---------- memory tricks ----------
+
+def test_legacy_string_mnemonic_still_loads():
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    data["mnemonic"] = "VIBGYOR"
+    p = ContentPackage.model_validate(data)
+    assert p.mnemonic.trick == "VIBGYOR" and p.mnemonic.decode == []
+
+
+def test_mnemonic_checks():
+    from pathshala_bot.models import Mnemonic, mnemonic_issues
+
+    soup = Mnemonic(kind="sentence", trick="म-पू-सं-वृ-मत्स्य-सि-अ", decode=[{"cue": "म", "stands_for": "मत्स्य"}, {"cue": "पू", "stands_for": "पूर्व"}], tip="")
+    assert any("letters" in i for i in mnemonic_issues(soup))
+    missing = Mnemonic(kind="story", trick="मछली पूरब से चली", decode=[{"cue": "मछली", "stands_for": "a"}, {"cue": "हाथी", "stands_for": "b"}], tip="")
+    assert any("not found" in i for i in mnemonic_issues(missing))
+    good = ContentPackage.model_validate_json(FIXTURE.read_text(encoding="utf-8")).mnemonic
+    assert mnemonic_issues(good) == []
+
+
+def test_review_drops_trick_that_still_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    from pathshala_bot import llm
+    from pathshala_bot.models import Mnemonic
+
+    bad = Mnemonic(kind="sentence", trick="A-B-C-D", decode=[{"cue": "Q", "stands_for": "x"}], tip="")
+    review = llm.MnemonicReview(verdict="rewrite", score=3, problems=["letter soup"], improved=bad)
+    fake = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(parse=lambda **k: SimpleNamespace(stop_reason="end_turn", parsed_output=review))))
+    monkeypatch.setattr(llm, "client", lambda: fake)
+    p = ContentPackage.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
+    assert llm.review_mnemonic(load_exams()["rajasthan-si"], p) is None
+
+    good = p.mnemonic
+    review2 = llm.MnemonicReview(verdict="keep", score=9, problems=[], improved=good)
+    fake2 = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(parse=lambda **k: SimpleNamespace(stop_reason="end_turn", parsed_output=review2))))
+    monkeypatch.setattr(llm, "client", lambda: fake2)
+    assert llm.review_mnemonic(load_exams()["rajasthan-si"], p) == good

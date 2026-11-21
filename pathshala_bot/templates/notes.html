@@ -38,7 +38,13 @@
   th { background: var(--navy); color: #fff; }
   tr:nth-child(even) td { background: var(--soft); }
   td.term { font-weight: 700; width: 34%; }
-  .mnemonic { border-left: 5px solid var(--accent); background: #fff6ec; padding: 8px 12px; border-radius: 6px; break-inside: avoid; }
+  .mnemonic { border-left: 5px solid var(--accent); background: #fff6ec; padding: 10px 14px; border-radius: 6px; break-inside: avoid; }
+  .mnemonic .trick { font-size: 14pt; font-weight: 700; color: var(--navy); line-height: 1.4; }
+  .mnemonic table { margin-top: 8px; font-size: 9.8pt; }
+  .mnemonic th { background: #f3c79b; color: var(--navy); }
+  .mnemonic td.cue { font-weight: 700; color: #c4610a; width: 30%; }
+  .mnemonic tr:nth-child(even) td { background: #fff1e0; }
+  .mnemonic .tip { margin-top: 6px; font-size: 9.5pt; }
   .q { break-inside: avoid; margin: 6px 0 8px; }
   .q .stem { font-weight: 700; }
   .q ol { list-style: upper-alpha; margin: 3px 0; }
@@ -94,7 +100,16 @@
 
   {% if pkg.mnemonic %}
   <h2>{{ t.mnemonic }}</h2>
-  <div class="mnemonic">{{ pkg.mnemonic }}</div>
+  <div class="mnemonic">
+    <div class="trick">“{{ pkg.mnemonic.trick }}”</div>
+    {% if pkg.mnemonic.decode %}
+    <table>
+      <tr><th>{{ t.cue }}</th><th>{{ t.stands_for }}</th></tr>
+      {% for c in pkg.mnemonic.decode %}<tr><td class="cue">{{ c.cue }}</td><td>{{ c.stands_for }}</td></tr>{% endfor %}
+    </table>
+    {% endif %}
+    {% if pkg.mnemonic.tip %}<div class="tip"><b>{{ t.tip }}:</b> {{ pkg.mnemonic.tip }}</div>{% endif %}
+  </div>
   {% endif %}
 
   <div class="clear"></div>

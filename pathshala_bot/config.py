@@ -45,6 +45,8 @@ class Settings:
     claude_model: str = field(default_factory=lambda: _env("CLAUDE_MODEL", "claude-opus-5-5"))
     research_effort: str = field(default_factory=lambda: _env("RESEARCH_EFFORT", "medium"))
     generation_effort: str = field(default_factory=lambda: _env("GENERATION_EFFORT", "high"))
+    # Second Claude call that checks / rewrites the memory trick
+    mnemonic_review: bool = field(default_factory=lambda: _bool("MNEMONIC_REVIEW", True))
     max_web_searches: int = field(default_factory=lambda: int(_env("MAX_WEB_SEARCHES", "6")))
 
     # Telegram
