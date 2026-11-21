@@ -9,7 +9,7 @@ An automated exam-prep content pipeline plus a Telegram bot. Each run:
    - `card.png`: a 1080×1350 topic card
    - `short.mp4`: a 1080×1920 animated short made with **Manim**, voiced by ElevenLabs (or Edge TTS, or silent). It comes in one of several [video styles](#video-styles).
    - `map.png`: an accurate static map whenever the topic has a map scene (it's also embedded in the PDF)
-   - `notes.pdf`: A4 notes with a cheatsheet table, practice questions, an answer key and sources
+   - `notes.pdf`: A4 notes with a cheatsheet table, practice questions, an answer key and sources. Every page carries your logo in the header, a faint logo-and-name watermark, and a © copyright footer; a full copyright notice closes the notes. The logo is `assets/brand/logo.png`; replace it, or set `BRAND_LOGO`, `COPYRIGHT_OWNER` and `PDF_WATERMARK=false` in `.env`.
 5. **Publishes**
    - **Telegram:** the card with the post, native **quiz polls**, the PDF and the video
    - **YouTube Shorts:** resumable upload through the Data API

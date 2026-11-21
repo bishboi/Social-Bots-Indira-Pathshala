@@ -36,6 +36,10 @@ class Settings:
     # Branding
     brand_name: str = field(default_factory=lambda: _env("BRAND_NAME", "Indira Pathshala"))
     brand_handle: str = field(default_factory=lambda: _env("BRAND_HANDLE", "@indirapathshala"))
+    brand_logo: Path = field(default_factory=lambda: Path(_env("BRAND_LOGO", str(PROJECT_DIR / "assets" / "brand" / "logo.png"))))
+    # Copyright holder shown in PDFs (defaults to the brand name)
+    copyright_owner: str = field(default_factory=lambda: _env("COPYRIGHT_OWNER"))
+    pdf_watermark: bool = field(default_factory=lambda: _bool("PDF_WATERMARK", True))
 
     # Claude
     claude_model: str = field(default_factory=lambda: _env("CLAUDE_MODEL", "claude-opus-5-5"))

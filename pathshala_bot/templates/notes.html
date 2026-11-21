@@ -3,15 +3,19 @@
 <head>
 <meta charset="utf-8">
 <title>{{ pkg.title }}</title>
+<meta name="author" content="{{ owner }}">
+<meta name="description" content="{{ exam.name }} · {{ pkg.subject }} · © {{ year }} {{ owner }}">
+<meta name="keywords" content="{{ exam.short_name }}, {{ pkg.subject }}, {{ brand }}">
 <style>
   {% for f in font_faces %}
   @font-face { font-family: "{{ f.family }}"; src: url("{{ f.url }}"); font-weight: {{ f.weight }}; }
   {% endfor %}
   @page {
     size: A4; margin: 22mm 16mm 20mm 16mm;
-    @top-left { content: "{{ brand }}"; font: 600 9pt "PSans", sans-serif; color: #5b5f7a; }
+    @top-left { content: element(runhead); }
     @top-right { content: "{{ handle }}"; font: 9pt "PSans", sans-serif; color: #5b5f7a; }
-    @bottom-center { content: counter(page) " / " counter(pages); font: 9pt "PSans", sans-serif; color: #5b5f7a; }
+    @bottom-left { content: "© {{ year }} {{ owner }}. All rights reserved."; font: 8pt "PSans", sans-serif; color: #5b5f7a; }
+    @bottom-right { content: counter(page) " / " counter(pages); font: 9pt "PSans", sans-serif; color: #5b5f7a; }
   }
   :root { --ink: #121630; --muted: #5b5f7a; --accent: #ff9933; --navy: #0e1630; --soft: #f4f5fb; --line: #e3e5f0; }
   body { font-family: "PSans", "Noto Sans Devanagari", "Noto Sans", "DejaVu Sans", sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.55; }
@@ -37,13 +41,34 @@
   .answers td { font-size: 9.5pt; }
   .sources { font-size: 8.5pt; color: var(--muted); word-break: break-all; }
   .page-break { break-before: page; }
+  .runhead { position: running(runhead); font: 600 9pt "PSans", sans-serif; color: #5b5f7a; }
+  .runhead img { height: 9mm; width: 9mm; vertical-align: middle; margin-right: 2mm; }
+  .runhead span { vertical-align: middle; }
+  /* fixed elements repeat on every page: the watermark */
+  .wm { position: fixed; top: 50%; left: 50%; width: 120mm; height: 120mm; margin: -60mm 0 0 -60mm; z-index: -1; text-align: center; }
+  .wm img { width: 120mm; height: 120mm; opacity: 0.06; }
+  .wm-text { position: fixed; top: 46%; left: -20mm; width: 220mm; text-align: center; transform: rotate(-35deg);
+             font: 700 40pt "PSans", sans-serif; letter-spacing: 4pt; color: #0e1630; opacity: 0.05; z-index: -1; }
+  .hero { display: flex; align-items: center; }
+  .hero .logo { width: 24mm; height: 24mm; margin-right: 5mm; flex: none; background: #fff; border-radius: 50%; }
+  .hero .text { flex: 1; }
+  .rights { margin-top: 18px; padding: 10px 14px; border-top: 2px solid var(--accent); font-size: 8.5pt; color: var(--muted); break-inside: avoid; display: flex; align-items: center; }
+  .rights img { width: 14mm; height: 14mm; margin-right: 4mm; flex: none; }
 </style>
 </head>
 <body>
+  <div class="runhead">{% if logo_url %}<img src="{{ logo_url }}">{% endif %}<span>{{ brand }}</span></div>
+  {% if watermark %}
+  {% if logo_url %}<div class="wm"><img src="{{ logo_url }}"></div>{% endif %}
+  <div class="wm-text">{{ brand | upper }}</div>
+  {% endif %}
   <div class="hero">
+    {% if logo_url %}<img class="logo" src="{{ logo_url }}">{% endif %}
+    <div class="text">
     <div class="chips"><span class="alt">{{ pkg.subject }}</span></div>
     <h1>{{ pkg.title }}</h1>
     <p class="hook">{{ pkg.hook }}</p>
+    </div>
   </div>
 
   <h2>{{ t.key_points }}</h2>
@@ -89,5 +114,11 @@
   <h2>{{ t.sources }}</h2>
   <ol class="sources">{% for s in pkg.sources %}<li>{{ s.title }} — {{ s.url }}</li>{% endfor %}</ol>
   {% endif %}
+
+  <div class="rights">
+    {% if logo_url %}<img src="{{ logo_url }}">{% endif %}
+    <div><b>© {{ year }} {{ owner }}</b> ({{ handle }}). {{ t.rights }}
+    {% if map_url %}<br>Map data: DataMeet India (CC BY 4.0), Natural Earth, GeoNames (CC BY 4.0).{% endif %}</div>
+  </div>
 </body>
 </html>

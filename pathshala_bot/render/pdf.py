@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -12,9 +13,11 @@ from . import fonts
 
 LABELS = {
     "hi": dict(key_points="मुख्य बिंदु", mnemonic="याद रखने की ट्रिक", cheatsheet="चीट शीट", term="विषय", detail="तथ्य",
-               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत", map="मानचित्र"),
+               practice="अभ्यास प्रश्न", answers="उत्तर कुंजी व व्याख्या", sources="स्रोत", map="मानचित्र",
+               rights="सर्वाधिकार सुरक्षित। इस PDF को बेचना, बदलना या बिना अनुमति के दोबारा प्रकाशित करना वर्जित है। निःशुल्क व्यक्तिगत अध्ययन हेतु साझा कर सकते हैं।"),
     "en": dict(key_points="Key Points", mnemonic="Memory Trick", cheatsheet="Cheatsheet", term="Term", detail="Fact",
-               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources", map="Map"),
+               practice="Practice Questions", answers="Answer Key & Explanations", sources="Sources", map="Map",
+               rights="All rights reserved. Selling, altering or republishing this PDF without permission is prohibited. You may share it free of charge for personal study."),
 }
 
 _env = Environment(loader=FileSystemLoader(PACKAGE_DIR / "templates"), autoescape=select_autoescape(["html"]))
@@ -33,6 +36,10 @@ def render_pdf(pkg: ContentPackage, exam: Exam, out: Path, map_png: Path | None 
         lang=exam.language if exam.language != "hinglish" else "en",
         t=LABELS["hi" if exam.language == "hi" else "en"], font_faces=faces,
         map_url=map_png.resolve().as_uri() if map_png else None,
+        logo_url=settings.brand_logo.resolve().as_uri() if settings.brand_logo.exists() else None,
+        watermark=settings.pdf_watermark,
+        year=date.today().year,
+        owner=settings.copyright_owner or settings.brand_name,
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     (out.with_suffix(".html")).write_text(html, encoding="utf-8")
