@@ -24,7 +24,7 @@ from .models import Blueprint, Question, QuestionBatch, QuestionDraft, Section, 
 
 log = logging.getLogger(__name__)
 
-BATCH = 15  # questions per writer call
+BATCH = 10  # questions per writer call (each carries a hint and a detailed explanation)
 CHECK_BATCH = 20  # questions per checker call
 REFILL_ROUNDS = 2
 PARALLEL = 3
@@ -70,7 +70,12 @@ Rules:
 - Figures: if a question truly needs one (geometry, circuit, ray diagram, graph, figure series, mirror/water image,
   Venn diagram), set needs_diagram and write a precise diagram_brief (every shape, label, value and position) that does not
   reveal the answer; the stem still gives every value needed. Otherwise needs_diagram is false and the brief empty.
-- Solutions explain the reasoning step by step, the way a good teacher would.
+- Every question carries three layers of help, in the content language:
+  hint: a nudge to think in the right direction (the concept, rule, formula or first step) - never the answer, never
+        "option B", and it must not rule options out by name;
+  solution: the answer with the key steps, short;
+  explanation: a detailed lesson a weak student can learn from - the concept behind the question, the full working,
+        why EACH wrong option is wrong, and one related fact, shortcut or common trap worth remembering.
 - pyq_reference and source_url stay empty (these are new questions)."""
 
 
@@ -113,7 +118,7 @@ Difficulty of this batch: {mix_txt}.
 Already used in this test series (write different questions):
 {avoid_txt}"""
         try:
-            out = llm.structured(_system(exam, bp, language), user, QuestionBatch, max_tokens=24000, effort="medium")
+            out = llm.structured(_system(exam, bp, language), user, QuestionBatch, max_tokens=32000, effort="medium")
         except Exception:
             log.exception("question batch failed (%s)", section.subject)
             return []
@@ -166,7 +171,9 @@ Reply with the questions as a numbered list, in the paper's language.""", settin
 - options: exactly as in the paper (drop 'A)' prefixes); correct_index from the official answer key.
 - pyq_reference: '{exam.short_name} {year}' plus the shift if known. source_url: where it was found.
 - topic: the closest of these topics: {', '.join(t.topic for t in section.topics)}.
-- Write a step-by-step solution for each. needs_diagram true only if the original question has a figure; then describe it
+- For each, write a hint (a nudge towards the concept or first step that does not give the answer away), a short
+  solution, and a detailed explanation: the concept, the full working, why each wrong option is wrong, and a related fact
+  or common trap. needs_diagram true only if the original question has a figure; then describe it
   in diagram_brief exactly as in the paper.""",
         f"Exam: {exam.name} {year}, section {section.subject}\n\nRESEARCH NOTES\n{research.notes}\n\nSOURCES\n{srcs}",
         QuestionBatch, max_tokens=32000, effort="low")
@@ -192,12 +199,14 @@ def check(exam: Exam, drafts: list[QuestionDraft], language: str) -> list[str]:
         listing = "\n\n".join(
             f"Q{i + 1}. {d.question}\n" + "\n".join(f"  ({j}) {o}" for j, o in enumerate(d.options))
             + (f"\n  [Figure: {d.diagram_brief}]" if d.needs_diagram and d.diagram_brief else "")
+            + (f"\n  Hint shown to students: {d.hint}" if d.hint.strip() else "")
             for i, d in enumerate(chunk))
         try:
             res = llm.structured(
                 f"You are an expert examiner for {exam.name}. Solve each question yourself, carefully, without guessing: "
                 "work numericals out fully and recall facts precisely. Give the 0-based index of the correct option and report "
-                "any problem (no correct option, two correct options, ambiguity, outdated or wrong fact, missing data).",
+                "any problem (no correct option, two correct options, ambiguity, outdated or wrong fact, missing data, "
+                "or a hint that gives the answer away).",
                 f"Questions (language: {language}):\n\n{listing}", Verdicts, max_tokens=16000, effort="medium")
         except Exception:
             log.exception("checker failed; batch accepted unchecked")
@@ -234,6 +243,7 @@ def draw_figures(drafts: list[QuestionDraft], language: str) -> list[str]:
 def to_question(d: QuestionDraft, subject: str, svg: str = "", flagged: str = "") -> Question:
     return Question(id=uuid.uuid4().hex[:10], subject=subject, topic=d.topic, question=d.question.strip(),
                     options=[o.strip() for o in d.options], correct_index=d.correct_index, solution=d.solution.strip(),
+                    hint=d.hint.strip(), explanation=d.explanation.strip(),
                     difficulty=d.difficulty, svg=svg, diagram_brief=d.diagram_brief if d.needs_diagram else "",
                     pyq_reference=d.pyq_reference.strip(), source_url=d.source_url.strip(), flagged=flagged)
 

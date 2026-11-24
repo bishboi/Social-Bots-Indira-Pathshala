@@ -57,6 +57,10 @@
           <div class="qhead"><span x-text="L.q + ' ' + q().n + ' / ' + qs.length"></span><span x-text="q().section"></span><span x-show="q().ref" x-text="q().ref"></span></div>
           <div class="stem" x-text="q().question"></div>
           <div class="fig" x-show="q().svg"><img :src="q().svg" alt="figure"></div>
+          <div x-show="q().hint" style="margin-bottom:10px">
+            <button class="btn" x-show="!hinted[q().id]" @click="showHint()" x-text="'💡 ' + L.showHint"></button>
+            <div class="hint" x-show="hinted[q().id]"><b x-text="'💡 ' + L.hint"></b> <span x-text="q().hint"></span></div>
+          </div>
           <template x-for="(o, j) in q().options"><button class="opt" :class="answers[q().id]===j && 'on'" @click="choose(j)">
             <span class="l" x-text="letter(j)"></span><span x-text="o"></span></button></template>
           <div class="row" style="justify-content:space-between; margin-top:6px">
@@ -92,7 +96,7 @@
           <div><span class="muted" x-text="L.percentile"></span><b x-text="res.percentile"></b></div>
           <div><span class="muted" x-text="L.accuracy"></span><b x-text="res.accuracy + '%'"></b></div>
         </div>
-        <div class="row muted"><span class="status-correct" x-text="'✔ ' + res.correct + ' ' + L.correct"></span>·<span class="status-wrong" x-text="'✘ ' + res.wrong + ' ' + L.wrong"></span>·<span x-text="res.skipped + ' ' + L.skipped"></span>·<span x-text="L.time + ' ' + mmss(spent)"></span></div>
+        <div class="row muted"><span class="status-correct" x-text="'✔ ' + res.correct + ' ' + L.correct"></span>·<span class="status-wrong" x-text="'✘ ' + res.wrong + ' ' + L.wrong"></span>·<span x-text="res.skipped + ' ' + L.skipped"></span>·<span x-text="L.time + ' ' + mmss(spent)"></span><span x-show="hintCount()" x-text="'· 💡 ' + hintCount() + ' ' + L.hintsUsed"></span></div>
         <div class="table-wrap" style="margin-top:10px"><table>
           <tr><th x-text="L.section"></th><th x-text="L.score"></th><th x-text="L.correct"></th><th x-text="L.wrong"></th><th x-text="L.skipped"></th></tr>
           <template x-for="s in res.sections"><tr><td x-text="s.subject"></td><td x-text="s.score + ' / ' + s.max"></td><td x-text="s.correct"></td><td x-text="s.wrong"></td><td x-text="s.skipped"></td></tr></template>
@@ -110,7 +114,10 @@
           <div class="fig" x-show="byId[r.id].svg"><img :src="byId[r.id].svg" alt="figure"></div>
           <template x-for="(o, j) in byId[r.id].options"><div class="opt" :class="j===r.correct ? 'right' : (j===r.chosen ? 'wrong' : '')">
             <span class="l" x-text="letter(j)"></span><span x-text="o"></span></div></template>
-          <div class="sol" x-text="r.solution"></div>
+          <div class="hint" x-show="r.hint"><b x-text="'💡 ' + L.hint + (hinted[r.id] ? ' (' + L.used + ')' : '')"></b> <span x-text="r.hint"></span></div>
+          <div class="sol"><b x-text="L.solution"></b><div x-text="r.solution"></div></div>
+          <template x-if="r.explanation"><details class="explain" :open="r.status!=='correct'">
+            <summary x-text="L.explanation"></summary><div x-text="r.explanation"></div></details></template>
         </div>
       </template>
     </div>

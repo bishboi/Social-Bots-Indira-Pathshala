@@ -46,6 +46,8 @@
   .opts div { margin: 1px 0; }
   .opts .right { color: var(--ok); font-weight: 700; }
   .sol { margin: 4px 0 0 16px; padding: 5px 9px; background: var(--soft); border-radius: 6px; font-size: 9.5pt; white-space: pre-line; }
+  .sol .h { font-size: 8.5pt; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4pt; display: block; margin-top: 4px; }
+  .sol .h:first-child { margin-top: 0; }
   .key { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0 12px; }
   .key span { width: 15mm; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font-size: 9pt; }
   .page-break { break-before: page; }
@@ -87,7 +89,9 @@
   <div class="stem"><b>{{ n }}.</b>{{ q.question }}{% if q.pyq_reference %} <span class="ref">[{{ q.pyq_reference }}]</span>{% endif %}</div>
   {% if q.svg %}<div class="fig"><img src="{{ svg_uri(q.svg) }}"></div>{% endif %}
   <div class="opts">{% for o in q.options %}<div class="{{ 'right' if mode == 'solutions' and loop.index0 == q.correct_index else '' }}">({{ letters[loop.index0] }}) {{ o }}{% if mode == 'solutions' and loop.index0 == q.correct_index %} ✔{% endif %}</div>{% endfor %}</div>
-  {% if mode == 'solutions' %}<div class="sol">{{ q.solution }}{% if q.source_url %}
+  {% if mode == 'solutions' %}<div class="sol">{% if q.hint %}<span class="h">{{ t.get('hint', 'Hint') }}</span>{{ q.hint }}
+{% endif %}<span class="h">{{ t.get('solution', 'Solution') }}</span>{{ q.solution }}{% if q.explanation %}
+<span class="h">{{ t.get('explanation', 'Detailed explanation') }}</span>{{ q.explanation }}{% endif %}{% if q.source_url %}
 <span class="ref">Source: {{ q.source_url }}</span>{% endif %}</div>{% endif %}
 </div>
 {% endfor %}

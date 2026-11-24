@@ -32,7 +32,7 @@ EN: dict[str, str] = {
     "k_title": "DID YOU KNOW?", "k_bullets": "KEY POINTS", "k_fact": "FACT", "k_quiz": "QUIZ TIME", "k_reveal": "ANSWER",
     "k_timeline": "TIMELINE", "k_map": "ON THE MAP", "k_formula": "FORMULA", "k_comparison": "COMPARE", "k_image": "LOOK",
     "k_cta": "FOLLOW", "join_telegram": "Join Telegram",
-    "k_pyq": "PREVIOUS YEAR QUESTION", "answer": "Answer", "solution": "Solution",
+    "k_pyq": "PREVIOUS YEAR QUESTION", "answer": "Answer", "solution": "Solution", "hint": "Hint", "explanation": "Detailed explanation",
     "pyq_opener": "Friends, this question was asked in the {exam} exam in {year}...",
     # Telegram
     "memory_trick": "Memory trick", "pdf_caption": "Free PDF notes by {brand}", "top_stories": "Today's top stories",
@@ -65,7 +65,7 @@ HI: dict[str, str] = {
     "k_title": "क्या आप जानते हैं?", "k_bullets": "मुख्य बिंदु", "k_fact": "रोचक तथ्य", "k_quiz": "क्विज़ टाइम", "k_reveal": "सही उत्तर",
     "k_timeline": "समयरेखा", "k_map": "मानचित्र पर", "k_formula": "सूत्र", "k_comparison": "तुलना", "k_image": "देखिए",
     "k_cta": "फॉलो करें", "join_telegram": "Telegram जॉइन करें",
-    "k_pyq": "पिछले वर्ष का प्रश्न", "answer": "उत्तर", "solution": "हल",
+    "k_pyq": "पिछले वर्ष का प्रश्न", "answer": "उत्तर", "solution": "हल", "hint": "संकेत", "explanation": "विस्तृत व्याख्या",
     "pyq_opener": "दोस्तों, यह प्रश्न साल {year} में {exam} परीक्षा में पूछा गया था...",
     "memory_trick": "याद रखने की ट्रिक", "pdf_caption": "{brand} के निःशुल्क PDF नोट्स", "top_stories": "आज के मुख्य समाचार",
     "akhbar_title": "इंदिरा पाठशाला समसामयिकी पत्रिका", "akhbar_title_top": "इंदिरा पाठशाला",

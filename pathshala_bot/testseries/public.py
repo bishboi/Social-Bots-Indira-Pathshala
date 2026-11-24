@@ -148,7 +148,7 @@ def score(test: Test, answers: dict) -> dict:
                 s["score"] -= sec.negative_marks
                 status = "wrong"
             review.append({"n": n, "id": qid, "chosen": chosen, "correct": q.correct_index, "status": status,
-                           "solution": q.solution, "source_url": q.source_url})
+                           "solution": q.solution, "explanation": q.explanation, "hint": q.hint, "source_url": q.source_url})
         s["score"] = round(s["score"], 2)
         total += s["score"]
         max_score += s["max"]
@@ -165,7 +165,7 @@ def public_questions(test: Test) -> list[dict]:
         n += 1
         out.append({"n": n, "id": q.id, "section": sec.subject, "question": q.question, "options": q.options,
                     "svg": ("data:image/svg+xml;base64," + __import__("base64").b64encode(q.svg.encode()).decode()) if q.svg else "",
-                    "ref": q.pyq_reference})
+                    "ref": q.pyq_reference, "hint": q.hint})
     return out
 
 

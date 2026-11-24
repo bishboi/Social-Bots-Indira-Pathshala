@@ -7,7 +7,8 @@
     submit: 'Submit', q: 'Question', mark: 'Mark for review', unmark: 'Unmark', clear: 'Clear', prev: '← Previous', next: 'Save & next →',
     palette: 'Questions', answered: 'Answered', marked: 'Marked', notAnswered: 'Not answered', notVisited: 'Not visited',
     score: 'Score', rank: 'Rank', percentile: 'Percentile', accuracy: 'Accuracy', correct: 'Correct', wrong: 'Wrong', skipped: 'Skipped',
-    time: 'Time', solutions: 'Solutions', nextTests: 'Next in this series', allTests: 'All tests',
+    time: 'Time', solutions: 'Solutions', showHint: 'Show hint', hint: 'Hint', hintsUsed: 'hint(s) used', used: 'used',
+    solution: 'Solution', explanation: 'Detailed explanation', nextTests: 'Next in this series', allTests: 'All tests',
     f_all: 'All', f_wrong: 'Wrong', f_skipped: 'Skipped', f_correct: 'Correct',
     sure: n => `Submit the test? ${n} question(s) are not answered.`, timeUp: 'Time is up – your test was submitted.',
   };
@@ -18,7 +19,8 @@
     submit: 'सबमिट करें', q: 'प्रश्न', mark: 'रिव्यू के लिए चिह्नित करें', unmark: 'चिह्न हटाएँ', clear: 'उत्तर हटाएँ', prev: '← पिछला', next: 'सेव करें और आगे →',
     palette: 'प्रश्न सूची', answered: 'उत्तर दिया', marked: 'चिह्नित', notAnswered: 'उत्तर नहीं दिया', notVisited: 'नहीं देखा',
     score: 'अंक', rank: 'रैंक', percentile: 'पर्सेंटाइल', accuracy: 'शुद्धता', correct: 'सही', wrong: 'गलत', skipped: 'छोड़े गए',
-    time: 'समय', solutions: 'हल', nextTests: 'इस सीरीज़ में आगे', allTests: 'सभी टेस्ट',
+    time: 'समय', solutions: 'हल', showHint: 'संकेत देखें', hint: 'संकेत', hintsUsed: 'संकेत देखे', used: 'देखा',
+    solution: 'हल', explanation: 'विस्तृत व्याख्या', nextTests: 'इस सीरीज़ में आगे', allTests: 'सभी टेस्ट',
     f_all: 'सभी', f_wrong: 'गलत', f_skipped: 'छोड़े गए', f_correct: 'सही',
     sure: n => `टेस्ट सबमिट करें? ${n} प्रश्नों का उत्तर नहीं दिया गया है।`, timeUp: 'समय समाप्त – आपका टेस्ट सबमिट हो गया।',
   });
@@ -33,7 +35,7 @@
     const key = `pathshala-test:${m.series}:${m.test}`;
     return {
       m, L: m.language === 'hi' ? HI : EN, phase: 'intro', error: '', busy: false, form: {name: '', phone: '', email: ''},
-      token: '', qs: [], byId: {}, cur: 0, answers: {}, marked: {}, seen: {}, deadline: 0, left: 0, spent: 0, started: 0,
+      token: '', qs: [], byId: {}, cur: 0, answers: {}, marked: {}, seen: {}, hinted: {}, deadline: 0, left: 0, spent: 0, started: 0,
       res: null, filter: 'all', resumable: false, ticker: null,
       init() {
         const saved = store.get(key);
@@ -53,11 +55,11 @@
         const saved = this.resumable ? store.get(key) : null;
         try {
           if (saved) {
-            Object.assign(this, {token: saved.token, qs: saved.qs, answers: saved.answers || {}, marked: saved.marked || {},
+            Object.assign(this, {token: saved.token, qs: saved.qs, answers: saved.answers || {}, marked: saved.marked || {}, hinted: saved.hinted || {},
               seen: saved.seen || {}, cur: saved.cur || 0, deadline: saved.deadline, started: saved.started});
           } else {
             const d = await this.post(`/t/${m.series}/${m.test}/start`, this.form);
-            Object.assign(this, {token: d.token, qs: d.questions, answers: {}, marked: {}, seen: {}, cur: 0,
+            Object.assign(this, {token: d.token, qs: d.questions, answers: {}, marked: {}, seen: {}, hinted: {}, cur: 0,
               started: Date.now(), deadline: Date.now() + m.minutes * 60000});
           }
           this.byId = Object.fromEntries(this.qs.map(q => [q.id, q]));
@@ -68,7 +70,7 @@
       },
       discard() { store.del(key); this.resumable = false; },
       save() {
-        store.set(key, {token: this.token, qs: this.qs, answers: this.answers, marked: this.marked, seen: this.seen, cur: this.cur,
+        store.set(key, {token: this.token, qs: this.qs, answers: this.answers, marked: this.marked, seen: this.seen, hinted: this.hinted, cur: this.cur,
           deadline: this.deadline, started: this.started, form: {name: this.form.name}});
       },
       tick() {
@@ -84,6 +86,8 @@
       choose(j) { this.answers[this.q().id] = j; this.save(); },
       clear() { delete this.answers[this.q().id]; this.save(); },
       toggleMark() { const id = this.q().id; this.marked[id] = !this.marked[id]; this.save(); },
+      showHint() { this.hinted[this.q().id] = true; this.save(); },
+      hintCount() { return Object.values(this.hinted).filter(Boolean).length; },
       answeredCount() { return Object.keys(this.answers).length; },
       paletteClass(x, i) {
         const c = [];

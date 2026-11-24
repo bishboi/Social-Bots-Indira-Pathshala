@@ -74,7 +74,8 @@ def _stem(topic, i):
 def _draft(topic, i, correct=1, diagram=False):
     return QuestionDraft(topic=topic, question=_stem(topic, i),
                          options=[f"opt {i} a", f"opt {i} b", f"opt {i} c", f"opt {i} d"], correct_index=correct,
-                         solution="because", difficulty="medium", needs_diagram=diagram,
+                         solution="because", hint=f"think about {topic}", explanation=f"concept of {topic}; why A, C, D are wrong",
+                         difficulty="medium", needs_diagram=diagram,
                          diagram_brief="a square ABCD with side 4 cm" if diagram else "", pyq_reference="", source_url="")
 
 
@@ -180,6 +181,15 @@ def test_build_publish_and_take_a_test(ctl, monkeypatch):
     d = builder.test_dir("si", spec.id)
     assert (d / "test.json").exists() and (d / "paper.pdf").exists() and (d / "solutions.pdf").exists()
     assert (d / "paper.pdf").read_bytes()[:4] == b"%PDF"
+    q0 = test.questions[0]
+    assert q0.hint and q0.explanation
+    from pathshala_bot.testseries import render
+
+    ctx = render.context(test, builder.exam_for(cfg, ts), make_bp())
+    sol = render._env.get_template("test_paper.html").render(mode="solutions", **ctx)
+    paper = render._env.get_template("test_paper.html").render(mode="paper", **ctx)
+    assert q0.explanation in sol and q0.hint in sol and "विस्तृत व्याख्या" in sol  # Hindi exam -> Hindi labels
+    assert q0.explanation not in paper and q0.hint not in paper
 
     with TestClient(create_app(with_bot=False)) as client:
         page = client.get("/t/si/subject-hindi-1")
@@ -191,13 +201,14 @@ def test_build_publish_and_take_a_test(ctl, monkeypatch):
         r = client.post("/t/si/subject-hindi-1/start", json={"name": "Asha", "phone": "+91 98290 12345"})
         assert r.status_code == 200
         qs = r.json()["questions"]
-        assert len(qs) == 25 and all("correct_index" not in q and "solution" not in q for q in qs)
+        assert len(qs) == 25 and all("correct_index" not in q and "solution" not in q and "explanation" not in q for q in qs)
+        assert qs[0]["hint"].startswith("think about")  # hints are available during the test
         key = {q.id: q.correct_index for q in test.questions}
         answers = {qs[0]["id"]: key[qs[0]["id"]], qs[1]["id"]: (key[qs[1]["id"]] + 1) % 4}
         res = client.post("/t/si/subject-hindi-1/submit", json={"token": r.json()["token"], "answers": answers, "seconds": 300}).json()
         assert (res["correct"], res["wrong"], res["skipped"]) == (1, 1, 23)
         assert res["score"] == round(2 - 0.66, 2) and res["max_score"] == 50 and res["rank"] == 1
-        assert res["review"][0]["solution"] == "because"
+        assert res["review"][0]["solution"] == "because" and "why A, C, D are wrong" in res["review"][0]["explanation"]
         assert client.post("/t/si/subject-hindi-1/submit", json={"token": "forged.sig", "answers": {}}).status_code == 403
         assert client.post("/t/si/other/submit", json={"token": r.json()["token"], "answers": {}}).status_code == 404
         # signup tests' PDFs are not public

@@ -67,7 +67,9 @@ class QuestionDraft(BaseModel):
     question: str = Field(description="The question stem, self-contained. Use plain text; for maths write e.g. x^2, sqrt(3), 1/2, pi.")
     options: list[str] = Field(description="The options, no 'A)' prefixes. Exactly one is correct.")
     correct_index: int = Field(description="0-based index of the correct option.")
-    solution: str = Field(description="Step-by-step solution / explanation a student can learn from, max 700 characters.")
+    hint: str = Field(description="A nudge shown on request during the test: the concept, rule or first step to think of, max 200 characters. Must NOT give away the answer or eliminate options by name.")
+    solution: str = Field(description="Short solution: the answer and the key steps / reason, max 500 characters.")
+    explanation: str = Field(description="Detailed explanation for learning, max 1800 characters: the concept behind the question, full working, why EACH wrong option is wrong, and a related fact, shortcut or common trap to remember. Use line breaks between parts.")
     difficulty: Difficulty
     needs_diagram: bool = Field(description="True only if the question cannot be understood without a figure (geometry, circuit, ray diagram, graph, figure series, mirror image, map, table-as-image).")
     diagram_brief: str = Field(description="If needs_diagram: precise description of the figure for an illustrator - every shape, label, value, position. Must not reveal the answer. Else empty.")
@@ -99,6 +101,8 @@ class Question(BaseModel):
     options: list[str]
     correct_index: int
     solution: str
+    hint: str = ""
+    explanation: str = ""  # detailed: concept, working, why each wrong option is wrong, a tip
     difficulty: Difficulty = "medium"
     svg: str = ""  # sanitised SVG figure (generated with an OpenRouter model)
     diagram_brief: str = ""
