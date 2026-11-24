@@ -119,6 +119,13 @@ class Settings:
     edge_voice_hi: str = field(default_factory=lambda: _env("EDGE_VOICE_HI", "hi-IN-SwaraNeural"))
     edge_voice_en: str = field(default_factory=lambda: _env("EDGE_VOICE_EN", "en-IN-NeerjaNeural"))
 
+    # Test series: OpenRouter draws SVG figures for diagram questions
+    openrouter_api_key: str = field(default_factory=lambda: _env("OPENROUTER_API_KEY"))
+    openrouter_model: str = field(default_factory=lambda: _env("OPENROUTER_MODEL", "anthropic/claude-sonnet-5.5"))
+    openrouter_fallback: str = field(default_factory=lambda: _env("OPENROUTER_FALLBACK_MODEL", "google/gemini-3.8-flash"))
+    # Public address of this server (online tests are linked from posts), e.g. https://tests.example.com
+    public_base_url: str = field(default_factory=lambda: _env("PUBLIC_BASE_URL").rstrip("/"))
+
     # Storage
     output_dir: Path = field(default_factory=lambda: Path(_env("OUTPUT_DIR", str(PROJECT_DIR / "output"))))
     db_path: Path = field(default_factory=lambda: Path(_env("DB_PATH", str(PROJECT_DIR / "output" / "history.sqlite3"))))

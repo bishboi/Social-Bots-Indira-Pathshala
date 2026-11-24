@@ -206,6 +206,95 @@ def create_app(with_bot: bool = True) -> FastAPI:
         sched.run_space_now(sid, dry_run=dry)
         return {"started": True, "dry_run": dry}
 
+    # ---------------- test series
+    from ..testseries import builder as tsb
+    from ..testseries import public as tsp
+
+    app.include_router(tsp.router())
+
+    @app.get("/api/series", dependencies=guard)
+    def series_status():
+        cfg = control.load()
+        control.apply(cfg)
+        out = {}
+        hist = None
+        for ts in cfg.test_series:
+            bp = tsb.load_blueprint(ts)
+            have = tsb.built(ts.id)
+            try:
+                hist = hist or get_history()
+                stats = hist.series_stats(ts.id)
+            except Exception as e:  # tables not created yet
+                stats = {"tests": {}, "leads": 0, "error": str(e)[:200]}
+            specs = tsb.plan(ts, bp) if bp else []
+            planned = {s.id for s in specs}
+            rows = []
+            for spec in specs + [tsb.TestSpec(id=t.id, kind=t.kind, order=t.order, title=t.title, access=t.access)
+                                 for t in have.values() if t.id not in planned]:
+                t = have.get(spec.id)
+                rows.append({"id": spec.id, "kind": spec.kind, "title": spec.title, "planned": spec.id in planned,
+                             "questions": len(t.questions) if t else spec.questions, "built": bool(t),
+                             "minutes": t.duration_minutes if t else None, "access": t.access if t else spec.access,
+                             "note": t.note if t else "", "flagged": sum(1 for q in t.questions if q.flagged) if t else 0,
+                             "figures": sum(1 for q in t.questions if q.svg) if t else 0,
+                             "published": (t.published or {}).get("at") if t else None,
+                             "files": [n for n in ("paper.pdf", "solutions.pdf") if t and (tsb.test_dir(ts.id, t.id) / n).exists()],
+                             "url": tsb.test_url(ts.id, spec.id), **(stats["tests"].get(spec.id) or {})})
+            out[ts.id] = {"blueprint": bp.model_dump() if bp else None,
+                          "summary": tsb.describe_blueprint(bp) if bp else "", "tests": rows,
+                          "leads": stats.get("leads", 0), "stats_error": stats.get("error"), "url": tsb.series_url(ts.id)}
+        from ..testseries import diagrams
+
+        return {"series": out, "diagrams": diagrams.available(), "public_url": settings.public_base_url}
+
+    @app.post("/api/series/{sid}/run", dependencies=guard)
+    async def run_series(sid: str, what: str = "next", dry: bool = False):
+        if what not in ("next", "all", "blueprint"):
+            raise HTTPException(400, "what must be next, all or blueprint")
+        if control.load().series(sid) is None:
+            raise HTTPException(404, "No such test series (save first)")
+        sched.run_series_now(sid, what=what, dry_run=dry)
+        return {"started": True}
+
+    @app.post("/api/series/{sid}/tests/{tid}/publish", dependencies=guard)
+    async def publish_test(sid: str, tid: str):
+        import asyncio
+
+        cfg = control.load()
+        control.apply(cfg)
+        ts, test = cfg.series(sid), tsb.load_test(sid, tid)
+        if ts is None or test is None:
+            raise HTTPException(404, "Not found")
+        res = await asyncio.to_thread(tsb.publish, cfg, ts, test)
+        return {"summary": res.get("summary", "")}
+
+    @app.delete("/api/series/{sid}/tests/{tid}", dependencies=guard)
+    def delete_test(sid: str, tid: str):
+        if not tsb.delete_test(sid, tid):
+            raise HTTPException(404, "Not found")
+        return {"deleted": True}
+
+    @app.get("/api/series/{sid}/leads.csv", dependencies=guard)
+    def leads_csv(sid: str):
+        import csv
+        import io
+
+        from fastapi.responses import Response
+
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["created_at", "test_id", "name", "phone", "email"])
+        for r in get_history().leads(sid):
+            w.writerow([r.get(k, "") for k in ("created_at", "test_id", "name", "phone", "email")])
+        return Response(buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{sid}-leads.csv"'})
+
+    @app.get("/series-files/{sid}/{tid}/{name}", dependencies=guard)
+    def series_file(sid: str, tid: str, name: str):
+        if name not in ("paper.pdf", "solutions.pdf", "test.json") or tsb.load_test(sid, tid) is None:
+            raise HTTPException(404)
+        return FileResponse(tsb.test_dir(sid, tid) / name)
+
     @app.post("/api/schedules/{sid}/run", dependencies=guard)
     async def run_now(sid: str, dry: bool = False):
         if control.load().schedule(sid) is None:

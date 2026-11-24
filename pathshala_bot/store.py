@@ -38,7 +38,35 @@ CREATE TABLE IF NOT EXISTS headlines (
     headline TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS headlines_exam ON headlines(exam_id, day);
+CREATE TABLE IF NOT EXISTS test_leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    series_id TEXT NOT NULL,
+    test_id TEXT NOT NULL,
+    name TEXT,
+    phone TEXT,
+    email TEXT
+);
+CREATE INDEX IF NOT EXISTS test_leads_series ON test_leads(series_id, id);
+CREATE TABLE IF NOT EXISTS test_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    series_id TEXT NOT NULL,
+    test_id TEXT NOT NULL,
+    lead_id INTEGER,
+    name TEXT,
+    score REAL,
+    max_score REAL,
+    correct INTEGER,
+    wrong INTEGER,
+    skipped INTEGER,
+    seconds INTEGER,
+    answers TEXT
+);
+CREATE INDEX IF NOT EXISTS test_attempts_test ON test_attempts(series_id, test_id);
 """
+
+ATTEMPT_COLS = ("series_id", "test_id", "lead_id", "name", "score", "max_score", "correct", "wrong", "skipped", "seconds")
 
 
 def _now() -> str:
@@ -134,6 +162,35 @@ class SQLiteHistory:
             rows = c.execute(q + " ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
         return [json.loads(r[0]) for r in rows]
 
+    # ---- test series: leads (sign-ups) and attempts
+    def add_lead(self, series_id: str, test_id: str, name: str, phone: str, email: str = "") -> int:
+        with closing(self._conn()) as c, c:
+            cur = c.execute("INSERT INTO test_leads(created_at, series_id, test_id, name, phone, email) VALUES (?,?,?,?,?,?)",
+                            (_now(), series_id, test_id, name, phone, email))
+            return int(cur.lastrowid)
+
+    def add_attempt(self, row: dict) -> None:
+        with closing(self._conn()) as c, c:
+            c.execute(f"INSERT INTO test_attempts(created_at, {', '.join(ATTEMPT_COLS)}, answers) VALUES (?{',?' * len(ATTEMPT_COLS)},?)",
+                      (_now(), *[row.get(k) for k in ATTEMPT_COLS], json.dumps(row.get("answers") or {})))
+
+    def test_scores(self, series_id: str, test_id: str) -> list[float]:
+        with closing(self._conn()) as c:
+            return [r[0] for r in c.execute("SELECT score FROM test_attempts WHERE series_id=? AND test_id=?", (series_id, test_id))]
+
+    def series_stats(self, series_id: str) -> dict:
+        with closing(self._conn()) as c:
+            tests = {r[0]: {"attempts": r[1], "avg": round(r[2] or 0, 2)} for r in c.execute(
+                "SELECT test_id, COUNT(*), AVG(score * 100.0 / NULLIF(max_score, 0)) FROM test_attempts WHERE series_id=? GROUP BY test_id", (series_id,))}
+            leads = c.execute("SELECT COUNT(*) FROM test_leads WHERE series_id=?", (series_id,)).fetchone()[0]
+        return {"tests": tests, "leads": leads}
+
+    def leads(self, series_id: str, limit: int = 5000) -> list[dict]:
+        with closing(self._conn()) as c:
+            c.row_factory = sqlite3.Row
+            return [dict(r) for r in c.execute(
+                "SELECT created_at, test_id, name, phone, email FROM test_leads WHERE series_id=? ORDER BY id DESC LIMIT ?", (series_id, limit))]
+
 
 class SupabaseHistory:
     backend = "supabase"
@@ -207,6 +264,33 @@ class SupabaseHistory:
         if exam_id:
             params["exam_id"] = f"eq.{exam_id}"
         return [r["content"] for r in self.db.select("runs", params) if r.get("content")]
+
+    # ---- test series
+    def add_lead(self, series_id: str, test_id: str, name: str, phone: str, email: str = "") -> int:
+        rows = self.db.insert("test_leads", {"series_id": series_id, "test_id": test_id, "name": name, "phone": phone, "email": email})
+        return int(rows[0]["id"]) if rows else 0
+
+    def add_attempt(self, row: dict) -> None:
+        self.db.insert("test_attempts", {**{k: row.get(k) for k in ATTEMPT_COLS}, "answers": row.get("answers") or {}})
+
+    def test_scores(self, series_id: str, test_id: str) -> list[float]:
+        rows = self.db.select("test_attempts", {"select": "score", "series_id": f"eq.{series_id}", "test_id": f"eq.{test_id}", "limit": "10000"})
+        return [r["score"] for r in rows if r.get("score") is not None]
+
+    def series_stats(self, series_id: str) -> dict:
+        rows = self.db.select("test_attempts", {"select": "test_id,score,max_score", "series_id": f"eq.{series_id}", "limit": "20000"})
+        tests: dict = {}
+        for r in rows:
+            t = tests.setdefault(r["test_id"], {"attempts": 0, "_sum": 0.0})
+            t["attempts"] += 1
+            t["_sum"] += (r["score"] or 0) * 100.0 / (r["max_score"] or 1)
+        for t in tests.values():
+            t["avg"] = round(t.pop("_sum") / t["attempts"], 2)
+        return {"tests": tests, "leads": self.db.count("test_leads", {"series_id": f"eq.{series_id}"})}
+
+    def leads(self, series_id: str, limit: int = 5000) -> list[dict]:
+        return self.db.select("test_leads", {"select": "created_at,test_id,name,phone,email", "series_id": f"eq.{series_id}",
+                                             "order": "id.desc", "limit": str(limit)})
 
 
 # Backwards compatible name

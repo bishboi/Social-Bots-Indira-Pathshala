@@ -69,6 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     el.add_argument("name", help="exam name as you'd type it, e.g. 'Rajasthan Patwari'")
     el.add_argument("--save", action="store_true", help="add a researched exam to the panel's custom exams")
 
+    ts = sub.add_parser("series", help="test series: list them, or build tests (previous-year papers, subject tests, full mocks)")
+    ts.add_argument("series_id", nargs="?", help="test series id (omit to list)")
+    ts.add_argument("--all", action="store_true", help="build every missing test of the funnel")
+    ts.add_argument("--blueprint", action="store_true", help="re-research the exam pattern (sections, topic ratios, marking)")
+    ts.add_argument("--dry-run", action="store_true", help="build without posting to channels")
+
     a = ap.parse_args(argv)
     if a.cmd == "exams":
         for e in load_exams().values():
@@ -90,6 +96,26 @@ def main(argv: list[str] | None = None) -> int:
             cfg.custom_exams.append(control.CustomExam.model_validate(res["exam"]))
             control.save(cfg)
             print(f"Saved as custom exam '{res['exam']['id']}'. Add it to a space in the panel.")
+        return 0
+    if a.cmd == "series":
+        from . import control
+        from .testseries import builder
+
+        cfg = control.load()
+        control.apply(cfg)
+        if not a.series_id:
+            for t in cfg.test_series:
+                bp = builder.load_blueprint(t)
+                have = builder.built(t.id)
+                print(f"{t.id:16} {'on ' if t.enabled else 'off'} {t.name}: exam={t.exam_id} built={len(have)}"
+                      + (f"/{len(builder.plan(t, bp))} · {builder.describe_blueprint(bp)}" if bp else " (pattern not researched yet)"))
+            return 0
+        t = cfg.series(a.series_id)
+        if t is None:
+            print(f"No test series '{a.series_id}'. Create one in the panel's Test series tab.")
+            return 1
+        what = "blueprint" if a.blueprint else ("all" if a.all else "next")
+        print(builder.run(cfg, t, what=what, dry_run=a.dry_run, progress=lambda m: print("  ·", m)))
         return 0
     if a.cmd == "spaces":
         from . import control
@@ -173,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  PROBLEM     {problem}")
         status = supabase_db.Supabase().check()
         for table, st in status.items():
-            print(f"  {table:11} {'OK' if st == 'ok' else 'ERROR: ' + st}")
+            print(f"  {table:13} {'OK' if st == 'ok' else 'ERROR: ' + st}")
         ok = all(v == "ok" for v in status.values())
         print("Supabase is ready." if ok else "Fix the errors above (usually: run supabase/schema.sql in the SQL editor).")
         return 0 if ok else 1
@@ -257,7 +283,7 @@ def db_setup() -> int:
         print(f"  ERROR: {e}")
         return 1
     for table, st in status.items():
-        print(f"  {table:11} {'OK' if st == 'ok' else 'ERROR: ' + st}")
+        print(f"  {table:13} {'OK' if st == 'ok' else 'ERROR: ' + st}")
     if not all(v == "ok" for v in status.values()):
         if any("Invalid API key" in v or "(401)" in v for v in status.values()):
             ref = supabase_db.project_ref(settings.supabase_url) or "<project>"

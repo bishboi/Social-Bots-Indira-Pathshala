@@ -23,7 +23,7 @@ from .models import CONTENT_TYPES, VIDEO_STYLES
 Language = str  # any code in languages.LANGUAGES (validated on save)
 Platform = Literal["telegram", "youtube", "instagram"]
 OUTPUTS = ("card", "questions", "pdf", "short")  # what a content run produces / posts
-SECRET_FIELDS = {"anthropic_api_key", "openai_api_key", "gemini_api_key", "telegram_bot_token", "elevenlabs_api_key", "client_secret", "refresh_token", "access_token"}
+SECRET_FIELDS = {"anthropic_api_key", "openai_api_key", "gemini_api_key", "openrouter_api_key", "telegram_bot_token", "elevenlabs_api_key", "client_secret", "refresh_token", "access_token"}
 
 
 def _id() -> str:
@@ -146,6 +146,45 @@ class Space(BaseModel):
     schedule: SpaceSchedule = Field(default_factory=SpaceSchedule)
 
 
+class TestStage(BaseModel):
+    """One step of a test-series funnel."""
+
+    kind: Literal["pyq", "subject", "full"]
+    enabled: bool = True
+    count: int = 3  # pyq: latest N papers · subject: tests per subject · full: number of mock tests
+    questions: int = 0  # subject tests only: questions per test (0 = the subject's share of a full paper)
+    access: Literal["free", "signup", "private"] = "free"  # free: posted + open · signup: name+phone to attempt · private: admin only
+
+
+def default_stages() -> list[TestStage]:
+    return [TestStage(kind="pyq", count=3, access="free"),
+            TestStage(kind="subject", count=2, questions=25, access="signup"),
+            TestStage(kind="full", count=3, access="signup")]
+
+
+class TestSeries(BaseModel):
+    """A full test series for one exam: previous-year papers -> subject-wise tests -> full-length mocks.
+
+    Its agent researches the exam's pattern once (blueprint: sections, questions per subject and
+    topic, marking, duration) and builds every test to that ratio. A schedule releases the next
+    test of the funnel to the series' channels.
+    """
+
+    id: str = Field(default_factory=_id)
+    name: str
+    exam_id: str
+    enabled: bool = True
+    language: Language | None = None  # None = the exam's language
+    channel_ids: list[str] = Field(default_factory=list)
+    stages: list[TestStage] = Field(default_factory=default_stages)
+    diagrams: bool = True  # figure questions get SVG diagrams drawn by an OpenRouter model
+    focus: str = ""  # optional guidance, e.g. "Paper 1 only", "level slightly above the real exam"
+    schedule: SpaceSchedule = Field(default_factory=lambda: SpaceSchedule(enabled=False, mode="daily", times=["10:00"]))
+
+    def stage(self, kind: str) -> TestStage | None:
+        return next((s for s in self.stages if s.kind == kind and s.enabled), None)
+
+
 class Schedule(Timing):
     """Daily newspaper schedule (content runs are scheduled per space)."""
 
@@ -175,6 +214,9 @@ class General(BaseModel):
     akhbar_title_en: str = "Indira Pathshala Samsamayiki Patrika"
     akhbar_articles: int = 10
     max_parallel_runs: int = 2  # spaces run independently; at most this many render at the same time
+    openrouter_model: str = "anthropic/claude-sonnet-5.5"  # draws SVG figures for test questions
+    openrouter_fallback: str = "google/gemini-3.8-flash"
+    public_base_url: str = ""  # e.g. https://tests.example.com - links to online tests in posts
     telegram_admin_ids: list[str] = Field(default_factory=list)
 
 
@@ -184,6 +226,7 @@ class Secrets(BaseModel):
     gemini_api_key: str = ""
     telegram_bot_token: str = ""
     elevenlabs_api_key: str = ""
+    openrouter_api_key: str = ""
 
 
 class ControlConfig(BaseModel):
@@ -193,6 +236,7 @@ class ControlConfig(BaseModel):
     spaces: list[Space] = Field(default_factory=list)
     custom_exams: list[CustomExam] = Field(default_factory=list)
     schedules: list[Schedule] = Field(default_factory=list)  # newspaper schedules
+    test_series: list[TestSeries] = Field(default_factory=list)
     editions: list[NewsEdition] = Field(default_factory=default_editions)
 
     def space(self, sid: str) -> Space | None:
@@ -206,6 +250,9 @@ class ControlConfig(BaseModel):
 
     def schedule(self, sid: str) -> Schedule | None:
         return next((s for s in self.schedules if s.id == sid), None)
+
+    def series(self, sid: str) -> TestSeries | None:
+        return next((s for s in self.test_series if s.id == sid), None)
 
 
 # ---------------------------------------------------------------- storage
@@ -232,6 +279,7 @@ def _seed_from_env() -> ControlConfig:
         gemini_api_key=settings.gemini_api_key,
         telegram_bot_token=settings.telegram_bot_token,
         elevenlabs_api_key=settings.elevenlabs_api_key,
+        openrouter_api_key=settings.openrouter_api_key,
     )
     if settings.telegram_channel_id:
         cfg.channels.append(Channel(name="Main Telegram channel", platform="telegram", chat_id=settings.telegram_channel_id, send_video=settings.telegram_send_video))
@@ -350,6 +398,9 @@ def apply(cfg: ControlConfig) -> None:
         "llm_provider": g.llm_provider, "claude_model": g.claude_model.strip() or settings.claude_model,
         "openai_model": g.openai_model.strip() or settings.openai_model,
         "akhbar_title_hi": g.akhbar_title_hi, "akhbar_title_en": g.akhbar_title_en, "akhbar_articles": g.akhbar_articles,
+        "openrouter_model": g.openrouter_model.strip() or settings.openrouter_model,
+        "openrouter_fallback": g.openrouter_fallback.strip(),
+        "public_base_url": (g.public_base_url.strip() or settings.public_base_url).rstrip("/"),
     }.items():
         object.__setattr__(settings, k, v)
     if s.telegram_bot_token:
@@ -358,6 +409,8 @@ def apply(cfg: ControlConfig) -> None:
         object.__setattr__(settings, "elevenlabs_api_key", s.elevenlabs_api_key)
     if s.gemini_api_key:
         object.__setattr__(settings, "gemini_api_key", s.gemini_api_key)
+    if s.openrouter_api_key:
+        object.__setattr__(settings, "openrouter_api_key", s.openrouter_api_key)
     from . import providers
 
     changed = False
@@ -501,6 +554,32 @@ def _validate(cfg: ControlConfig) -> None:
             raise ValueError(f"{where}: unknown values {bad}")
         if not 0 <= sp.memory <= 500:
             raise ValueError(f"{where}: memory must be between 0 and 500 past topics")
+    series_ids = set()
+    for ts in cfg.test_series:
+        where = f"Test series '{ts.name}'"
+        if not ts.name.strip():
+            raise ValueError("Every test series needs a name")
+        if not re.match(r"^[a-z0-9-]{2,40}$", ts.id):
+            raise ValueError(f"{where}: id '{ts.id}' must be 2-40 lowercase letters, digits and hyphens")
+        if ts.id in series_ids:
+            raise ValueError(f"Two test series have the id '{ts.id}'")
+        series_ids.add(ts.id)
+        if ts.exam_id not in exam_ids:
+            raise ValueError(f"{where}: choose an exam")
+        check_timing(where, ts.schedule)
+        if [x for x in ts.channel_ids if x not in chan_ids]:
+            raise ValueError(f"{where}: unknown channel")
+        kinds = [st.kind for st in ts.stages]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError(f"{where}: each kind of test appears once")
+        for st in ts.stages:
+            if not 0 <= st.count <= 50:
+                raise ValueError(f"{where}: number of {st.kind} tests must be 0-50")
+            if st.questions and not 5 <= st.questions <= 200:
+                raise ValueError(f"{where}: questions per subject test must be 5-200 (0 = automatic)")
+    url = cfg.general.public_base_url.strip()
+    if url and not re.match(r"^https?://[^\s/]+", url):
+        raise ValueError("Public URL must start with https:// (e.g. https://tests.example.com)")
     if not 1 <= cfg.general.max_parallel_runs <= 8:
         raise ValueError("Parallel runs must be between 1 and 8")
     from .akhbar import regions
@@ -511,6 +590,7 @@ def _validate(cfg: ControlConfig) -> None:
     langs += [(f"schedule {s.name}", s.language) for s in cfg.schedules if s.language]
     langs += [(f"edition {e.region}", e.language) for e in cfg.editions]
     langs += [(f"custom exam {c.name}", c.language) for c in cfg.custom_exams]
+    langs += [(f"test series {t.name}", t.language) for t in cfg.test_series if t.language]
     bad_lang = [f"{where}: '{code}'" for where, code in langs if not is_known(code)]
     if bad_lang:
         raise ValueError("Unknown language " + ", ".join(bad_lang))

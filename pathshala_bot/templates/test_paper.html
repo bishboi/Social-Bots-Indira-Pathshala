@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if rtl else 'ltr' }}">
+<head>
+<meta charset="utf-8">
+<title>{{ test.title }}{% if mode == 'solutions' %} · Solutions{% endif %}</title>
+<meta name="author" content="{{ owner }}">
+<style>
+  {% for f in font_faces %}@font-face { font-family: "{{ f.family }}"; src: url("{{ f.url }}"); font-weight: {{ f.weight }}; }
+  {% endfor %}
+  @page {
+    size: A4; margin: 18mm 13mm 16mm 13mm;
+    @top-left { content: element(runhead); }
+    @top-right { content: "{{ exam.short_name }} · {{ test.title }}"; font: 8.5pt "PSans", sans-serif; color: #5b5f7a; }
+    @bottom-left { content: "© {{ year }} {{ owner }}. All rights reserved."; font: 8pt "PSans", sans-serif; color: #5b5f7a; }
+    @bottom-right { content: counter(page) " / " counter(pages); font: 9pt "PSans", sans-serif; color: #5b5f7a; }
+  }
+  :root { --ink: #121630; --muted: #5b5f7a; --accent: #ff9933; --navy: #0e1630; --soft: #f4f5fb; --line: #e3e5f0; --ok: #1f7a44; }
+  body { font-family: "PSans", "PDeva", "PLatin", sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.45; }
+  .runhead { position: running(runhead); font: 600 9pt "PSans", sans-serif; color: #5b5f7a; }
+  .runhead img { height: 9mm; width: 9mm; vertical-align: middle; margin-right: 2mm; }
+  .wm { position: fixed; top: 50%; left: 50%; width: 130mm; height: 128mm; margin: -64mm 0 0 -65mm; z-index: -1; opacity: 0.06; text-align: center; }
+  .wm img { width: 100mm; height: 100mm; }
+  .wm div { font: 700 24pt "PSans", sans-serif; letter-spacing: 3pt; color: #0e1630; }
+  .cover { background: var(--navy); color: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 12px; }
+  .cover .kind { display: inline-block; background: var(--accent); color: var(--navy); font-weight: 700; font-size: 8.5pt; border-radius: 20px; padding: 2px 10px; }
+  .cover h1 { font-size: 19pt; margin: 8px 0 2px; line-height: 1.25; }
+  .cover .exam { color: #cfd3ea; }
+  .facts { display: flex; gap: 8px; margin: 10px 0 0; }
+  .facts div { flex: 1; background: rgba(255,255,255,.1); border-radius: 8px; padding: 6px 10px; }
+  .facts b { display: block; font-size: 14pt; }
+  .facts span { font-size: 8pt; color: #cfd3ea; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 6px 0 10px; }
+  th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--navy); color: #fff; }
+  .note { background: #fff6ec; border-left: 4px solid var(--accent); padding: 6px 10px; font-size: 9pt; margin: 6px 0; }
+  ol.instr { font-size: 9.5pt; padding-left: 18px; }
+  h2 { font-size: 12.5pt; margin: 14px 0 6px; padding-bottom: 3px; border-bottom: 2px solid var(--accent); break-after: avoid; }
+  h2 small { font-weight: 400; color: var(--muted); font-size: 9pt; }
+  .q { break-inside: avoid; margin: 0 0 9px; }
+  .stem { white-space: pre-line; }
+  .stem b { margin-right: 4px; }
+  .ref { font-size: 8pt; color: var(--muted); }
+  .fig { text-align: center; margin: 5px 0; }
+  .fig img { max-width: 105mm; max-height: 70mm; }
+  .opts { margin: 3px 0 0 16px; }
+  .opts div { margin: 1px 0; }
+  .opts .right { color: var(--ok); font-weight: 700; }
+  .sol { margin: 4px 0 0 16px; padding: 5px 9px; background: var(--soft); border-radius: 6px; font-size: 9.5pt; white-space: pre-line; }
+  .key { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0 12px; }
+  .key span { width: 15mm; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font-size: 9pt; }
+  .page-break { break-before: page; }
+  {% if rtl %} .opts, .sol { margin: 3px 16px 0 0; } th, td { text-align: right; } {% endif %}
+</style>
+</head>
+<body>
+<div class="runhead">{% if logo_url %}<img src="{{ logo_url }}">{% endif %}<span>{{ brand }}</span></div>
+{% if watermark %}<div class="wm">{% if logo_url %}<img src="{{ logo_url }}">{% endif %}<div>{{ brand | upper }}</div></div>{% endif %}
+
+<div class="cover">
+  <span class="kind">{{ kind }}{% if mode == 'solutions' %} · Answer key &amp; solutions{% endif %}</span>
+  <h1>{{ test.title }}</h1>
+  <div class="exam">{{ exam.name }}</div>
+  <div class="facts">
+    <div><b>{{ total }}</b><span>Questions</span></div>
+    <div><b>{{ '%g' % test.total_marks }}</b><span>Marks</span></div>
+    <div><b>{{ test.duration_minutes }}</b><span>Minutes</span></div>
+    <div><b>{{ test.sections | length }}</b><span>Sections</span></div>
+  </div>
+</div>
+{% if test.note %}<div class="note">{{ test.note }}</div>{% endif %}
+
+{% if mode == 'paper' %}
+<table>
+  <tr><th>Section</th><th>Questions</th><th>Marks each</th><th>Negative</th></tr>
+  {% for sec, items in sections %}<tr><td>{{ sec.subject }}</td><td>{{ items | length }}</td><td>{{ '%g' % sec.marks_per_question }}</td><td>{{ ('-%g' % sec.negative_marks) if sec.negative_marks else '—' }}</td></tr>{% endfor %}
+</table>
+{% if instructions %}<b>Instructions</b><ol class="instr">{% for i in instructions %}<li>{{ i }}</li>{% endfor %}</ol>{% endif %}
+{% else %}
+<b>Answer key</b>
+<div class="key">{% for sec, items in sections %}{% for n, q in items %}<span>{{ n }}. {{ letters[q.correct_index] }}</span>{% endfor %}{% endfor %}</div>
+{% endif %}
+
+{% for sec, items in sections %}
+<h2>{{ sec.subject }} <small>· {{ items | length }} questions · {{ '%g' % sec.marks_per_question }} marks each{% if sec.negative_marks %} · −{{ '%g' % sec.negative_marks }} for a wrong answer{% endif %}</small></h2>
+{% for n, q in items %}
+<div class="q">
+  <div class="stem"><b>{{ n }}.</b>{{ q.question }}{% if q.pyq_reference %} <span class="ref">[{{ q.pyq_reference }}]</span>{% endif %}</div>
+  {% if q.svg %}<div class="fig"><img src="{{ svg_uri(q.svg) }}"></div>{% endif %}
+  <div class="opts">{% for o in q.options %}<div class="{{ 'right' if mode == 'solutions' and loop.index0 == q.correct_index else '' }}">({{ letters[loop.index0] }}) {{ o }}{% if mode == 'solutions' and loop.index0 == q.correct_index %} ✔{% endif %}</div>{% endfor %}</div>
+  {% if mode == 'solutions' %}<div class="sol">{{ q.solution }}{% if q.source_url %}
+<span class="ref">Source: {{ q.source_url }}</span>{% endif %}</div>{% endif %}
+</div>
+{% endfor %}
+{% endfor %}
+</body>
+</html>

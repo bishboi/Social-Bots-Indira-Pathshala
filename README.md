@@ -142,6 +142,49 @@ A content type built around **one real question from a past paper**. The researc
 
 The same question is the first Telegram quiz poll, tagged `[RPSC SI 2021]`. The PDF notes open with the question, the marked answer and the solution, and the source is listed. If no verifiable past-paper question is found, the post is made as a previous-year-*style* quiz (`pyq_quiz`) instead, never with an invented year. The agent picks this format by itself; to post only this format in a space, select just `previous_year_question` under Content types.
 
+## Test series
+
+The **Test series** tab builds a complete test series for any exam, as a funnel:
+
+1. **Previous-year papers**: the agent finds the real question papers of recent years on the web, section by section, using the official answer keys. If only part of a paper can be verified, the test says so (for example "62 of 100 questions"), and its time is scaled to match.
+2. **Subject-wise tests**: one subject at a time, with that subject's real topic mix.
+3. **Full-length mock tests**: built exactly like the real paper, with the same sections, number of questions, marks, negative marking and time.
+
+How the agents work:
+
+- **Pattern (blueprint).** First the agent researches the official pattern and analyses of previous-year papers: the sections, how many questions each section and each topic usually gets, marking, duration and the easy/medium/hard mix. The panel shows this table. Every test keeps these ratios: a 25-question Hindi test splits its questions across Hindi's topics in the same proportion as the real paper.
+- **Writer.** Writes the questions in batches, at the real paper's level and style, and never repeats a question already used in the series.
+- **Checker.** Solves every question again without seeing the key. Questions with a wrong key, two correct options or missing data are thrown out and rewritten. For previous-year papers the official key is kept, and any disagreement is flagged in the panel for you to review.
+- **Figures.** Questions that need a diagram (geometry, circuits, ray diagrams, figure series, mirror images, graphs) are drawn as SVG by an **OpenRouter** model. The defaults are `anthropic/claude-sonnet-5.5`, with `google/gemini-3.8-flash` as a backup; you can change both in Settings → Test series. The SVG is cleaned (no scripts or links) before use. Without an OpenRouter key, tests are built without figure questions.
+
+Each test produces a **question paper PDF**, a **solutions PDF** (answer key and step-by-step solutions) and an **online test** at `<Public URL>/t/<series>/<test>`. The online test has a timer, sections, a question palette, mark-for-review, autosave, negative marking, score, rank, percentile and solutions. The answers are never sent to the browser before the student submits. `<Public URL>/t/<series>` lists every released test, stage by stage.
+
+Each stage has its own access level:
+
+| Access | What happens |
+|---|---|
+| Free | Posted to the series' Telegram channels with both PDFs and the online link |
+| Sign-up | Students enter their name and mobile number to attempt it. These are your leads: download them as CSV from the panel. The post includes a sample question as a quiz poll |
+| Private | Not posted and not served publicly |
+
+Use **Build next** to build and post the next test in the funnel, or **Build all** to build every missing test without posting (use "post" on each test later). You can also turn on *release the next test automatically* for a drip schedule. A full mock takes several minutes and many AI calls (writer + checker, about one call per 15–20 questions each).
+
+To set it up, add the following in **Settings → Test series**:
+
+- **Public URL**: the HTTPS address of this server, for example `https://tests.example.com`. Students' test pages need no login.
+- **OpenRouter API key**: for the diagrams.
+
+If you use Supabase, run `supabase/schema.sql` again: it adds the `test_leads` and `test_attempts` tables.
+
+From the command line:
+
+```bash
+python -m pathshala_bot series                      # list series
+python -m pathshala_bot series rpsc-si --blueprint  # research the exam pattern again
+python -m pathshala_bot series rpsc-si              # build + post the next test
+python -m pathshala_bot series rpsc-si --all --dry-run
+```
+
 ## Daily current-affairs newspaper (Akhbar)
 
 The newspaper is published **per edition**, not per exam. An edition is a **region in one language**:

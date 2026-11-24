@@ -23,6 +23,7 @@ from . import control
 log = logging.getLogger(__name__)
 
 SPACE_JOB = "space:"  # job id prefix; newspaper jobs use the schedule id
+SERIES_JOB = "series:"
 
 _state_lock = threading.Lock()
 _state: dict = {"running": {}, "last": []}  # shown on the dashboard
@@ -61,6 +62,29 @@ def _run_guarded(key: str, label: str, cfg: control.ControlConfig, fn) -> str:
     with _state_lock:
         _state["last"] = ([{"schedule": label, "finished": datetime.now().isoformat(timespec="seconds"), "summary": summary}] + _state["last"])[:30]
     return summary
+
+
+def progress_for(key: str):
+    """Callback that shows a run's current step on the dashboard."""
+    def report(text: str) -> None:
+        with _state_lock:
+            if key in _state["running"]:
+                _state["running"][key]["state"] = str(text)[:160]
+    return report
+
+
+def execute_series(series_id: str, what: str = "next", dry_run: bool = False) -> str:
+    """Test-series agent: build (and release) the next test, all missing tests, or re-research the pattern."""
+    from .testseries import builder
+
+    cfg = control.load()
+    control.apply(cfg)
+    series = cfg.series(series_id)
+    if series is None:
+        return f"test series {series_id} no longer exists"
+    key = SERIES_JOB + series.id
+    label = f"Test series · {series.name}" + {"all": " (all tests)", "blueprint": " (exam pattern)"}.get(what, "") + (" (dry run)" if dry_run else "")
+    return _run_guarded(key, label, cfg, lambda: builder.run(cfg, series, what=what, dry_run=dry_run, progress=progress_for(key)))
 
 
 def execute_space(space_id: str, dry_run: bool = False) -> str:
@@ -153,6 +177,10 @@ class Scheduler:
             if sp.enabled and sp.schedule.enabled:
                 self.aps.add_job(self._fire_space, trigger_for(sp.schedule, tz), args=[sp.id], id=SPACE_JOB + sp.id,
                                  name=f"Space · {sp.name}", replace_existing=True)
+        for ts in cfg.test_series:
+            if ts.enabled and ts.schedule.enabled:
+                self.aps.add_job(self._fire_series, trigger_for(ts.schedule, tz), args=[ts.id], id=SERIES_JOB + ts.id,
+                                 name=f"Test series · {ts.name}", replace_existing=True)
         for s in cfg.schedules:
             if s.enabled:
                 self.aps.add_job(self._fire, trigger_for(s, tz), args=[s.id], id=s.id, name=s.name, replace_existing=True)
@@ -171,6 +199,19 @@ class Scheduler:
         sp = cfg.space(space_id)
         if sp and self._today_allowed(sp.schedule, cfg.general.timezone):
             await asyncio.to_thread(execute_space, space_id)
+
+    async def _fire_series(self, series_id: str):
+        import asyncio
+
+        cfg = control.load()
+        ts = cfg.series(series_id)
+        if ts and self._today_allowed(ts.schedule, cfg.general.timezone):
+            await asyncio.to_thread(execute_series, series_id)
+
+    def run_series_now(self, series_id: str, what: str = "next", dry_run: bool = False):
+        import asyncio
+
+        return asyncio.get_running_loop().create_task(asyncio.to_thread(execute_series, series_id, what, dry_run))
 
     async def _fire(self, schedule_id: str):
         import asyncio

@@ -22,7 +22,7 @@ def _reset_sb_mode(monkeypatch):
 class FakePostgREST:
     """Implements the subset of PostgREST the app uses: eq/neq/gte/not.is.null, order, limit, count, upsert."""
 
-    def __init__(self, tables=("runs", "headlines", "app_config")):
+    def __init__(self, tables=("runs", "headlines", "app_config", "test_leads", "test_attempts")):
         self.tables = {t: [] for t in tables}
         self.ids = {t: 0 for t in tables}
         self.requests = []
@@ -177,7 +177,7 @@ def test_helpful_errors(monkeypatch):
 
 def test_db_check(fake):
     status = supabase_db.Supabase().check()
-    assert status == {"runs": "ok", "headlines": "ok", "app_config": "ok"}
+    assert status == {"runs": "ok", "headlines": "ok", "app_config": "ok", "test_leads": "ok", "test_attempts": "ok"}
 
 
 def test_schema_file_matches_tables():

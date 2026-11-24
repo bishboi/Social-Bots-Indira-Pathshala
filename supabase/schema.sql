@@ -39,9 +39,39 @@ create table if not exists public.app_config (
   updated_at  timestamptz not null default now()
 );
 
+-- Test series: students who signed up for a test (leads) and their attempts
+create table if not exists public.test_leads (
+  id          bigint generated always as identity primary key,
+  created_at  timestamptz not null default now(),
+  series_id   text not null,
+  test_id     text not null,
+  name        text,
+  phone       text,
+  email       text
+);
+create index if not exists test_leads_series_idx on public.test_leads (series_id, id desc);
+create table if not exists public.test_attempts (
+  id          bigint generated always as identity primary key,
+  created_at  timestamptz not null default now(),
+  series_id   text not null,
+  test_id     text not null,
+  lead_id     bigint,
+  name        text,
+  score       double precision,
+  max_score   double precision,
+  correct     int,
+  wrong       int,
+  skipped     int,
+  seconds     int,
+  answers     jsonb not null default '{}'::jsonb
+);
+create index if not exists test_attempts_test_idx on public.test_attempts (series_id, test_id);
+
 -- Lock the tables down: Row Level Security on, and no policies, so the public
 -- "anon" key can read nothing. The server uses the service_role key, which
 -- bypasses RLS. app_config contains API keys – never expose it to a browser.
 alter table public.runs       enable row level security;
 alter table public.headlines  enable row level security;
 alter table public.app_config enable row level security;
+alter table public.test_leads    enable row level security;  -- phone numbers: server only
+alter table public.test_attempts enable row level security;

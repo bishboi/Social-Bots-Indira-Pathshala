@@ -67,7 +67,7 @@
     <form method="post" action="/logout" style="margin:0" @submit="dirty && !confirm('You have unsaved changes. Log out anyway?') && $event.preventDefault()"><button class="btn" type="submit">Log out</button></form>
   </div>
   <nav>
-    <template x-for="t in tabs"><button :class="tab===t.id && 'on'" @click="tab=t.id" x-text="t.label"></button></template>
+    <template x-for="t in tabs"><button :class="tab===t.id && 'on'" @click="tab=t.id; if (t.id==='series') refresh()" x-text="t.label"></button></template>
   </nav>
 </header>
 
@@ -232,6 +232,104 @@
     </template>
   </section>
 
+  <!-- ============ TEST SERIES ============ -->
+  <section x-show="tab==='series'">
+    <div class="section-title"><h2>Test series</h2><button class="btn" @click="addSeries()">+ Test series</button></div>
+    <p class="muted">A test series is a funnel for one exam: <b>1. previous-year papers</b> (real papers found on the web) → <b>2. subject-wise tests</b> → <b>3. full-length mock tests</b>. Its agent first researches the exam pattern (sections, questions per subject and topic, marking, time) and builds every test in the same ratio. Each question is solved again by a checker agent; wrong or doubtful ones are rewritten. Questions that need a figure get an SVG diagram drawn by an OpenRouter model. Students take the tests online with a timer, rank and solutions; sign-up tests collect their name and mobile number.</p>
+    <div class="card" x-show="!series.public_url"><span class="pill warn">!</span> Set the <b>Public URL</b> in Settings → Test series so posts can link to the online tests (needed for sign-up tests).</div>
+    <div class="card" x-show="!series.diagrams"><span class="pill warn">!</span> No OpenRouter key: tests are built without figure questions. Add it in Settings → Test series.</div>
+    <div class="card" x-show="!cfg.test_series.length"><div class="muted">No test series yet. Add one and choose its exam.</div></div>
+    <template x-for="(ts, i) in cfg.test_series" :key="ts._key || ts.id">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <div class="row"><b x-text="'🎯 ' + (ts.name || 'New test series')"></b>
+            <span class="pill" :class="ts.enabled && ts.schedule.enabled ? 'ok' : ''" x-text="!ts.enabled ? 'off' : (ts.schedule.enabled ? 'releases ' + describe({...ts.schedule, enabled: true}) : 'manual only')"></span>
+            <a class="muted" x-show="seriesInfo(ts).url" :href="seriesInfo(ts).url" target="_blank">student page ↗</a></div>
+          <div class="row">
+            <label class="toggle"><input type="checkbox" x-model="ts.enabled" @change="touch()"> enabled</label>
+            <button class="btn" @click="runSeries(ts, 'blueprint')" :disabled="dirty" title="Save first">Research pattern</button>
+            <button class="btn primary" @click="runSeries(ts, 'next')" :disabled="dirty" title="Build and post the next test">Build next</button>
+            <button class="btn" @click="runSeries(ts, 'all', true)" :disabled="dirty" title="Build every missing test without posting">Build all</button>
+            <button class="btn danger" @click="cfg.test_series.splice(i,1); touch()">Remove</button>
+          </div>
+        </div>
+        <div class="grid">
+          <div><label>Name</label><input x-model="ts.name" @input="touch()" placeholder="e.g. RPSC SI Test Series 2026"></div>
+          <div><label>ID (in links: /t/<span x-text="ts.id"></span>)</label><input x-model="ts.id" @input="touch()" :disabled="!ts._new"></div>
+          <div><label>Exam <span class="muted" x-show="ts.exam_id" x-text="'· ' + examName(ts.exam_id)"></span></label>
+            <div class="row" style="flex-wrap:nowrap"><input list="exam-names" x-model="examInput[spKey(ts)]" :placeholder="ts.exam_id ? examShort(ts.exam_id) : 'Type the exam name'" @keydown.enter.prevent="setSeriesExam(ts)" :disabled="looking[spKey(ts)]">
+              <button class="btn" @click="setSeriesExam(ts)" :disabled="looking[spKey(ts)] || !(examInput[spKey(ts)]||'').trim()" x-text="looking[spKey(ts)] ? '…' : 'Set'"></button></div>
+            <div class="muted" x-show="lookMsg[spKey(ts)]" x-text="lookMsg[spKey(ts)]"></div></div>
+          <div><label>Language</label><select x-model="ts.language" @change="ts.language = ts.language || null; touch()">
+            <option value="">The exam's language</option>
+            <template x-for="(v,k) in catalogue.languages"><option :value="k" x-text="v" :selected="ts.language===k"></option></template></select></div>
+        </div>
+        <div style="margin-top:10px"><label>Funnel</label>
+          <div class="table-wrap"><table>
+            <tr><th>Stage</th><th>On</th><th>How many</th><th>Questions</th><th>Access</th></tr>
+            <template x-for="st in ts.stages"><tr>
+              <td x-text="stageName(st.kind)"></td>
+              <td><input type="checkbox" style="width:auto" x-model="st.enabled" @change="touch()"></td>
+              <td><input type="number" min="0" max="50" style="max-width:90px" x-model.number="st.count" @input="touch()"> <span class="muted" x-text="{pyq: 'latest years', subject: 'per subject', full: 'mocks'}[st.kind]"></span></td>
+              <td><template x-if="st.kind==='subject'"><input type="number" min="0" max="200" style="max-width:90px" x-model.number="st.questions" @input="touch()" title="0 = the subject's share of a real paper"></template>
+                  <span class="muted" x-show="st.kind!=='subject'">as in the real paper</span></td>
+              <td><select x-model="st.access" @change="touch()"><option value="free">Free · posted with PDFs</option><option value="signup">Sign-up · name + mobile</option><option value="private">Private · not posted</option></select></td>
+            </tr></template>
+          </table></div></div>
+        <div style="margin-top:10px"><label>Channels (releases are posted here)</label><div class="chips">
+          <template x-for="c in cfg.channels.filter(c => c.platform==='telegram')"><button class="chip" :class="ts.channel_ids.includes(c.id) && 'on'" @click="toggle(ts.channel_ids, c.id)" x-text="icon(c.platform)+' '+c.name"></button></template></div></div>
+        <div class="grid" style="margin-top:10px">
+          <div><label>&nbsp;</label><label class="toggle"><input type="checkbox" x-model="ts.diagrams" @change="touch()"> figure questions with SVG diagrams (OpenRouter)</label></div>
+          <div style="grid-column: span 2"><label>Note for the agent (optional)</label><input x-model="ts.focus" @input="touch()" placeholder="e.g. Paper 1 only; slightly harder than the real exam"></div>
+        </div>
+        <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line)">
+          <label class="toggle"><input type="checkbox" x-model="ts.schedule.enabled" @change="touch()"> release the next test automatically</label>
+          <div class="grid" style="margin-top:8px" x-show="ts.schedule.enabled">
+            <div><label>Repeat</label><select x-model="ts.schedule.mode" @change="touch()"><option value="interval">Every X hours</option><option value="daily">At set times each day</option></select></div>
+            <template x-if="ts.schedule.mode==='interval'"><div><label>Every (hours)</label><input type="number" min="0.25" step="0.25" x-model.number="ts.schedule.every_hours" @input="touch()"></div></template>
+            <template x-if="ts.schedule.mode==='interval'"><div><label>Starting at (HH:MM)</label><input x-model="ts.schedule.start_at" @input="touch()"></div></template>
+            <template x-if="ts.schedule.mode==='daily'"><div><label>Times (HH:MM, comma separated)</label><input :value="ts.schedule.times.join(', ')" @change="ts.schedule.times = $event.target.value.split(',').map(x=>x.trim()).filter(Boolean); touch()"></div></template>
+          </div>
+          <div style="margin-top:8px" x-show="ts.schedule.enabled"><label>Days</label><div class="chips">
+            <template x-for="d in days"><button class="chip" :class="ts.schedule.days.includes(d) && 'on'" @click="toggle(ts.schedule.days, d)" x-text="d"></button></template></div></div>
+        </div>
+        <template x-if="seriesInfo(ts).blueprint">
+          <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line)">
+            <label>Exam pattern used for every test <span class="muted" x-text="'· ' + seriesInfo(ts).blueprint.exam_name + ' · ' + seriesInfo(ts).blueprint.stage"></span></label>
+            <div class="table-wrap"><table>
+              <tr><th>Section</th><th>Questions</th><th>Marks</th><th>Negative</th><th class="hide-sm">Topics (questions per paper)</th></tr>
+              <template x-for="sec in seriesInfo(ts).blueprint.sections"><tr>
+                <td x-text="sec.subject"></td><td x-text="sec.questions"></td><td x-text="sec.marks_per_question"></td><td x-text="sec.negative_marks || '—'"></td>
+                <td class="hide-sm muted" x-text="sec.topics.map(t => t.topic + ' ' + Math.round(t.questions * 10) / 10).join(' · ')"></td></tr></template>
+            </table></div>
+            <div class="muted" x-text="seriesInfo(ts).summary + ' · easy/medium/hard ' + [seriesInfo(ts).blueprint.difficulty_easy, seriesInfo(ts).blueprint.difficulty_medium, seriesInfo(ts).blueprint.difficulty_hard].join('/') + '%'"></div>
+          </div>
+        </template>
+        <div class="muted" style="margin-top:10px" x-show="!seriesInfo(ts).blueprint && !ts._new">The exam pattern hasn't been researched yet: “Research pattern” or “Build next” does it first.</div>
+        <div style="margin-top:12px" x-show="seriesInfo(ts).tests.length">
+          <div class="row" style="justify-content:space-between"><label>Tests <span class="muted" x-text="'· ' + seriesInfo(ts).tests.filter(t => t.built).length + ' of ' + seriesInfo(ts).tests.length + ' built · ' + seriesInfo(ts).leads + ' sign-ups'"></span></label>
+            <a class="muted" :href="'/api/series/' + ts.id + '/leads.csv'" x-show="seriesInfo(ts).leads">download sign-ups (CSV)</a></div>
+          <div class="table-wrap"><table>
+            <tr><th>Test</th><th>Questions</th><th class="hide-sm">Access</th><th>Status</th><th>Attempts</th><th></th></tr>
+            <template x-for="t in seriesInfo(ts).tests"><tr>
+              <td><span x-text="stageIcon(t.kind) + ' ' + t.title"></span><div class="muted" x-show="t.note" x-text="t.note"></div>
+                <div class="muted" x-show="t.flagged" x-text="t.flagged + ' previous-year answer(s) differ from the checker - review the solutions PDF'"></div></td>
+              <td><span x-text="t.questions"></span><span class="muted" x-show="t.minutes" x-text="' · ' + t.minutes + ' min'"></span><span class="muted" x-show="t.figures" x-text="' · ' + t.figures + ' figures'"></span></td>
+              <td class="hide-sm" x-text="t.access"></td>
+              <td><span class="pill" :class="t.built ? (t.published ? 'ok' : '') : 'warn'" x-text="t.built ? (t.published ? 'posted' : 'built') : 'planned'"></span></td>
+              <td x-text="t.attempts ? t.attempts + ' · avg ' + t.avg + '%' : '—'"></td>
+              <td><div class="row" x-show="t.built">
+                <template x-for="f in t.files"><a :href="'/series-files/' + ts.id + '/' + t.id + '/' + f" target="_blank" x-text="f.replace('.pdf','')"></a></template>
+                <a x-show="t.url && t.access!=='private'" :href="t.url" target="_blank">online</a>
+                <a href="#" @click.prevent="publishTest(ts, t)" x-show="t.access!=='private'">post</a>
+                <a href="#" class="danger" style="color:var(--bad)" @click.prevent="deleteTest(ts, t)">delete</a></div></td>
+            </tr></template>
+          </table></div>
+        </div>
+      </div>
+    </template>
+  </section>
+
   <!-- ============ EXAMS ============ -->
   <section x-show="tab==='exams'">
     <div class="section-title"><h2>Exams</h2><button class="btn" @click="newExam()">+ Enter one by hand</button></div>
@@ -362,6 +460,12 @@
       <div><label>Title (English)</label><input x-model="cfg.general.akhbar_title_en" @input="touch()"></div>
       <div><label>Max articles</label><input type="number" min="4" max="16" x-model.number="cfg.general.akhbar_articles" @input="touch()"></div>
     </div></div>
+    <div class="card"><h3>Test series</h3><div class="grid">
+      <div><label>Public URL of this server (for test links)</label><input x-model="cfg.general.public_base_url" @input="touch()" placeholder="https://tests.example.com"></div>
+      <div><label>OpenRouter API key (SVG diagrams)</label><input type="password" x-model="cfg.secrets.openrouter_api_key" @input="touch()" placeholder="not set"></div>
+      <div><label>Diagram model (OpenRouter)</label><input x-model="cfg.general.openrouter_model" @input="touch()" placeholder="anthropic/claude-sonnet-5.5"></div>
+      <div><label>Backup diagram model</label><input x-model="cfg.general.openrouter_fallback" @input="touch()" placeholder="google/gemini-3.8-flash"></div>
+    </div><p class="muted">Students open tests at <code x-text="(cfg.general.public_base_url || 'https://your-server') + '/t/&lt;series&gt;'"></code> – these pages need no login. Put the server behind HTTPS before sharing links.</p></div>
     <div class="card"><h3>Keys &amp; bot</h3><div class="grid">
       <div><label>Anthropic API key</label><input type="password" x-model="cfg.secrets.anthropic_api_key" @input="touch()" placeholder="not set"></div>
       <div><label>OpenAI API key</label><input type="password" x-model="cfg.secrets.openai_api_key" @input="touch()" placeholder="not set"></div>
@@ -378,9 +482,9 @@
 function app() {
   return {
     tab: 'dash', cfg: null, loadError: '', stopped: false, catalogue: {}, examDefs: {}, status: {}, dirty: false, saving: false, error: '', flash: '', tests: {},
-    tabs: [{id:'dash',label:'Dashboard'},{id:'spaces',label:'Spaces'},{id:'channels',label:'Channels'},{id:'exams',label:'Exams'},{id:'news',label:'Newspaper'},{id:'settings',label:'Settings'}],
+    tabs: [{id:'dash',label:'Dashboard'},{id:'spaces',label:'Spaces'},{id:'series',label:'Test series'},{id:'channels',label:'Channels'},{id:'exams',label:'Exams'},{id:'news',label:'Newspaper'},{id:'settings',label:'Settings'}],
     days: ['mon','tue','wed','thu','fri','sat','sun'],
-    examInput: {}, looking: {}, lookMsg: {},
+    examInput: {}, looking: {}, lookMsg: {}, series: {series: {}, diagrams: true, public_url: 'x'},
     async init() {
       for (;;) {  // keep retrying until the settings load (e.g. database fixed while the page is open)
         if (this.stopped) return;
@@ -406,13 +510,57 @@ function app() {
       const d = await this.api('GET', '/api/config');
       this.cfg = d.config; this.catalogue = d.catalogue; this.examDefs = d.exam_defs; this.dirty = false;
     },
-    async refresh() { if (this.stopped) return; try { this.status = await this.api('GET', '/api/status'); } catch (e) {} },
+    async refresh() {
+      if (this.stopped) return;
+      try { this.status = await this.api('GET', '/api/status'); } catch (e) {}
+      if (this.tab === 'series' || !this.seriesLoaded) { try { this.series = await this.api('GET', '/api/series'); this.seriesLoaded = true; } catch (e) {} }
+    },
+    seriesInfo(ts) { return this.series.series?.[ts.id] || {tests: [], leads: 0}; },
+    stageName(k) { return {pyq: '1 · Previous-year papers', subject: '2 · Subject-wise tests', full: '3 · Full-length mocks'}[k] || k; },
+    stageIcon(k) { return {pyq: '📜', subject: '📘', full: '🏁'}[k] || ''; },
+    addSeries() {
+      const used = new Set(this.cfg.test_series.map(s => s.id));
+      let n = this.cfg.test_series.length + 1, id = 'series-' + n;
+      while (used.has(id)) id = 'series-' + (++n);
+      this.cfg.test_series.push({id, _key: this.uid(), _new: true, name: '', exam_id: '', enabled: true, language: null,
+        channel_ids: [], diagrams: true, focus: '',
+        stages: [{kind: 'pyq', enabled: true, count: 3, questions: 0, access: 'free'},
+                 {kind: 'subject', enabled: true, count: 2, questions: 25, access: 'signup'},
+                 {kind: 'full', enabled: true, count: 3, questions: 0, access: 'signup'}],
+        schedule: {enabled: false, mode: 'daily', every_hours: 24, start_at: '10:00', times: ['10:00'], days: [...this.days]}});
+      this.touch();
+    },
+    async setSeriesExam(ts) {
+      const tmp = {_key: this.spKey(ts), exam_ids: []};
+      this.examInput[tmp._key] = this.examInput[this.spKey(ts)];
+      await this.addExam(tmp);
+      if (tmp.exam_ids.length) {
+        ts.exam_id = tmp.exam_ids[0];
+        if (!ts.name) ts.name = this.examShort(ts.exam_id) + ' Test Series';
+        if (ts._new) ts.id = this.slug(this.examShort(ts.exam_id)).slice(0, 40) || ts.id;
+        this.touch();
+      }
+    },
+    async runSeries(ts, what, dry) {
+      const label = {next: 'Building the next test', all: 'Building every missing test (not posted)', blueprint: 'Researching the exam pattern'}[what];
+      try { await this.api('POST', `/api/series/${ts.id}/run?what=${what}&dry=${!!dry}`); this.flash = `${label} for “${ts.name}”. Progress shows on the dashboard; a full mock takes several minutes.`; this.refresh(); }
+      catch (e) { this.error = e.message; }
+    },
+    async publishTest(ts, t) {
+      try { const r = await this.api('POST', `/api/series/${ts.id}/tests/${t.id}/publish`); this.flash = `${t.title}: ${r.summary}`; this.refresh(); }
+      catch (e) { this.error = e.message; }
+    },
+    async deleteTest(ts, t) {
+      if (!confirm(`Delete “${t.title}”? It will be built again by the next run.`)) return;
+      try { await this.api('DELETE', `/api/series/${ts.id}/tests/${t.id}`); this.refresh(); } catch (e) { this.error = e.message; }
+    },
     touch() { this.dirty = true; this.flash = ''; },
     async save() {
       this.saving = true; this.error = '';
       try {
         const body = JSON.parse(JSON.stringify(this.cfg));
         body.spaces.forEach(s => { delete s._new; delete s._key; });
+        body.test_series.forEach(s => { delete s._new; delete s._key; });
         const d = await this.api('PUT', '/api/config', body);
         this.cfg = d.config; this.catalogue = d.catalogue; this.examDefs = d.exam_defs; this.dirty = false;
         this.flash = 'Saved. Schedules reloaded.'; await this.refresh();

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ series.name }} · {{ brand }}</title>
+<link rel="stylesheet" href="/static/tests.css">
+</head><body>
+<header><div class="bar"><div class="brand">{{ brand }}</div><span class="muted">{{ handle }}</span></div></header>
+<main>
+  <div class="card">
+    <h1>{{ series.name }}</h1>
+    <div class="muted">{{ exam.name }} · test series</div>
+    <p>Start with real previous-year papers, practise one subject at a time, then take full-length mock tests exactly like the real exam — timed, with negative marking, your rank and step-by-step solutions.</p>
+  </div>
+  {% if not stages %}<div class="card muted">The first tests are being prepared. Please check back soon.</div>{% endif %}
+  {% for st in stages %}
+  <div class="stage">
+    <h2>{{ loop.index }}. {{ st.label }}</h2>
+    <div class="tests">
+      {% for t in st.tests %}
+      <div class="test">
+        <b>{{ t.title }}</b>
+        <div class="muted">{{ t.questions }} questions · {{ '%g' % t.marks }} marks · {{ t.minutes }} min</div>
+        <div class="row">
+          <span class="pill {{ t.access }}">{{ 'Free' if t.access == 'free' else 'Free sign-up' }}</span>
+        </div>
+        <div class="row" style="margin-top:auto">
+          <a class="btn primary" href="/t/{{ series.id }}/{{ t.id }}">Attempt online</a>
+          {% if t.pdf %}<a class="btn" href="/t/{{ series.id }}/{{ t.id }}/paper.pdf">PDF</a>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</main>
+</body></html>

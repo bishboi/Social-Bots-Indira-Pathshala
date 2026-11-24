@@ -21,7 +21,7 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-TABLES = ("runs", "headlines", "app_config")
+TABLES = ("runs", "headlines", "app_config", "test_leads", "test_attempts")
 
 # Which header style Supabase accepted for sb_ keys in this process (None = not yet known)
 _SB_MODE: dict[str, bool | None] = {"bearer": None}
