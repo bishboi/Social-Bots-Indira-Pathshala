@@ -175,3 +175,44 @@ def test_friendly_error_for_missing_ai_key():
         assert friendly_error("Telegram sendMessage failed: 401 Unauthorized") == "Telegram sendMessage failed: 401 Unauthorized"
     finally:
         object.__setattr__(settings, "llm_provider", saved)
+
+
+def test_openrouter_provider(monkeypatch):
+    import json
+
+    import httpx
+    from pydantic import BaseModel
+
+    from pathshala_bot import providers
+    from pathshala_bot.config import settings
+
+    class Out(BaseModel):
+        answer: str
+        n: int
+
+    object.__setattr__(settings, "openrouter_api_key", "or-test")
+    calls = []
+
+    def handler(req: httpx.Request):
+        body = json.loads(req.content)
+        calls.append(body)
+        if "plugins" in body:
+            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": "notes", "annotations": [
+                {"type": "url_citation", "url_citation": {"url": "https://rpsc.example", "title": "RPSC"}}]}}], "usage": {"cost": 0.05}})
+        if len(calls) == 2:  # first structured reply is invalid -> retried with the error
+            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"answer": "Jaipur"}'}}]})
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '```json\n{"answer": "Jaipur", "n": 6}\n```'}}],
+                                         "usage": {"cost": 0.01}})
+
+    try:
+        p = providers.OpenRouterProvider()
+        p.http = httpx.Client(transport=httpx.MockTransport(handler))
+        r = p.web_research("pattern?", 4)
+        assert r.notes == "notes" and r.sources == [{"title": "RPSC", "url": "https://rpsc.example"}]
+        assert calls[0]["plugins"][0]["id"] == "web" and calls[0]["model"] == settings.openrouter_text_model
+        out = p.structured("sys", "user", Out)
+        assert out == Out(answer="Jaipur", n=6) and len(calls) == 3
+        assert calls[1]["response_format"]["json_schema"]["schema"]["required"] == ["answer", "n"]
+        assert "not valid" in calls[2]["messages"][-1]["content"]
+    finally:
+        object.__setattr__(settings, "openrouter_api_key", "")

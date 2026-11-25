@@ -438,7 +438,8 @@
   <section x-show="tab==='settings'">
     <div class="card"><h3>AI provider</h3><div class="grid">
       <div><label>Provider used for research and writing</label><select x-model="cfg.general.llm_provider" @change="touch()">
-        <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option></select></div>
+        <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter (any model, one key)</option></select></div>
+      <div x-show="cfg.general.llm_provider==='openrouter'"><label>OpenRouter model (key under Settings → Test series)</label><input x-model="cfg.general.openrouter_text_model" @input="touch()" placeholder="anthropic/claude-sonnet-5.5"></div>
       <div x-show="cfg.general.llm_provider==='anthropic'"><label>Claude model</label><input x-model="cfg.general.claude_model" @input="touch()" placeholder="claude-opus-5-5"></div>
       <div x-show="cfg.general.llm_provider==='openai'"><label>OpenAI model (must support web search + structured outputs)</label><input x-model="cfg.general.openai_model" @input="touch()" placeholder="gpt-5.5"></div>
     </div><p class="muted">Applies to everything: topic research, posts, quizzes, notes, video scripts, memory-trick review and the daily newspaper. Add the matching API key under “Keys &amp; bot”.</p></div>
@@ -693,9 +694,10 @@ function app() {
       if (!this.cfg) return w;
       if (this.status.db_error) w.push('Database error: ' + this.status.db_error);
       if (this.status.startup_error) w.push('Schedules are not running – settings could not be loaded: ' + this.status.startup_error);
-      const openai = this.cfg.general.llm_provider === 'openai';
+      const openai = this.cfg.general.llm_provider === 'openai', openrouter = this.cfg.general.llm_provider === 'openrouter';
       if (openai && !this.status.openai_key && !this.cfg.secrets.openai_api_key) w.push('AI provider is OpenAI: add your OpenAI API key in Settings – nothing can be generated without it.');
-      if (!openai && !this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings (or switch the AI provider to OpenAI) – nothing can be generated without it.');
+      if (openrouter && !this.cfg.secrets.openrouter_api_key && !this.status.openrouter_key) w.push('AI provider is OpenRouter: add your OpenRouter API key in Settings → Test series.');
+      if (!openai && !openrouter && !this.status.anthropic_key && !this.cfg.secrets.anthropic_api_key) w.push('Add your Anthropic API key in Settings (or switch the AI provider to OpenAI) – nothing can be generated without it.');
       if (!this.cfg.secrets.telegram_bot_token) w.push('Add a Telegram bot token in Settings to post to Telegram.');
       if (!this.cfg.channels.some(c => c.enabled)) w.push('No channels are enabled.');
       if (!this.cfg.spaces.some(s => s.enabled)) w.push('No spaces are enabled – add one in the Spaces tab.');

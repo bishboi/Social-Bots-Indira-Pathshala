@@ -164,7 +164,7 @@ def create_app(with_bot: bool = True) -> FastAPI:
             r["files"] = sorted(p.name for p in d.glob("*") if p.suffix in (".pdf", ".mp4", ".png")) if d.is_dir() else []
         return {"jobs": sched.jobs(), "worker": sched.state(), "runs": runs, "bot": bool(state["bot"]),
                 "startup_error": sched.error,
-                "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")), "openai_key": bool(os.getenv("OPENAI_API_KEY")),
+                "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")), "openai_key": bool(os.getenv("OPENAI_API_KEY")), "openrouter_key": bool(settings.openrouter_api_key),
                 "provider": settings.llm_provider, "database": "supabase" if supabase_configured() else "sqlite",
                 "db_error": db_error}
 

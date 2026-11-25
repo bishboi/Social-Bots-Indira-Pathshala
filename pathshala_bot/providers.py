@@ -1,4 +1,4 @@
-"""AI providers: Anthropic (Claude) or OpenAI, chosen with LLM_PROVIDER / the admin panel.
+"""AI providers: Anthropic (Claude), OpenAI or OpenRouter, chosen with LLM_PROVIDER / the admin panel.
 
 Every AI step in the app goes through two operations, implemented for both:
 
@@ -15,7 +15,7 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-PROVIDERS = ("anthropic", "openai")
+PROVIDERS = ("anthropic", "openai", "openrouter")
 
 
 class ContentRefused(RuntimeError):
@@ -175,6 +175,108 @@ class OpenAIProvider:
         return resp.output_parsed
 
 
+# --------------------------------------------------------------------------- OpenRouter
+
+class OpenRouterProvider:
+    """Any model on OpenRouter (one key for Claude, GPT, Gemini...): web plugin for research, JSON schema for structure."""
+
+    name = "openrouter"
+    API = "https://openrouter.ai/api/v1/chat/completions"
+    spent = 0.0  # USD reported by OpenRouter in this process (shown in logs / CLI)
+
+    def __init__(self):
+        import httpx
+
+        if not settings.openrouter_api_key:
+            raise RuntimeError("could not resolve authentication method: no OpenRouter API key")
+        self.http = httpx.Client(timeout=httpx.Timeout(1200, connect=30))
+
+    @property
+    def model(self) -> str:
+        return settings.openrouter_text_model
+
+    def _post(self, body: dict) -> dict:
+        import time
+
+        import httpx
+
+        last = None
+        for attempt in range(5):
+            try:
+                r = self.http.post(self.API, json=body, headers={"Authorization": f"Bearer {settings.openrouter_api_key}",
+                                                                 "X-Title": settings.brand_name})
+            except httpx.HTTPError as e:  # network hiccup / timeout
+                last = e
+                time.sleep(3 * (attempt + 1))
+                continue
+            if r.status_code in (401, 403):
+                raise RuntimeError(f"OpenRouter rejected the API key ({r.status_code}): {r.text[:200]} (invalid x-api-key)")
+            if r.status_code in (408, 429, 500, 502, 503, 504):
+                last = RuntimeError(f"OpenRouter {r.status_code}: {r.text[:200]}")
+                time.sleep(5 * (attempt + 1))
+                continue
+            data = r.json()
+            if r.status_code >= 400 or "error" in data and not data.get("choices"):
+                raise RuntimeError(f"OpenRouter error {r.status_code}: {str(data.get('error') or data)[:300]}")
+            cost = float((data.get("usage") or {}).get("cost") or 0)
+            OpenRouterProvider.spent += cost
+            return data
+        raise RuntimeError(f"OpenRouter unavailable after retries: {last}")
+
+    @staticmethod
+    def _message(data: dict) -> dict:
+        ch = (data.get("choices") or [{}])[0]
+        if ch.get("finish_reason") == "length":
+            raise RuntimeError("output truncated (max_tokens)")
+        return ch.get("message") or {}
+
+    def web_research(self, prompt: str, max_searches: int) -> Research:
+        data = self._post({"model": self.model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 16000,
+                           "plugins": [{"id": "web", "max_results": max(5, min(20, max_searches * 2))}],
+                           "reasoning": {"effort": settings.research_effort}})
+        msg = self._message(data)
+        sources: dict[str, str] = {}
+        for a in msg.get("annotations") or []:
+            c = a.get("url_citation") or {}
+            if c.get("url"):
+                sources.setdefault(c["url"], c.get("title") or c["url"])
+        content = msg.get("content") or ""
+        if isinstance(content, list):
+            content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+        return _finish_research([content], sources)
+
+    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None):
+        import json as _json
+        import re
+
+        from pydantic import ValidationError
+
+        schema = model_cls.model_json_schema()
+        messages = [{"role": "system", "content": system},
+                    {"role": "user", "content": user + "\n\nReply with one JSON object that follows the given schema."}]
+        error = ""
+        for attempt in range(3):
+            msgs = messages + ([{"role": "user", "content": f"Your previous reply was not valid: {error[:800]}. Reply again with valid JSON only."}]
+                               if error else [])
+            data = self._post({"model": self.model, "messages": msgs, "max_tokens": max_tokens,
+                               "reasoning": {"effort": effort or settings.generation_effort},
+                               "response_format": {"type": "json_schema",
+                                                   "json_schema": {"name": model_cls.__name__, "strict": False, "schema": schema}}})
+            msg = self._message(data)
+            if msg.get("refusal"):
+                raise ContentRefused(f"OpenRouter model declined: {msg['refusal']}")
+            text = msg.get("content") or ""
+            if isinstance(text, list):
+                text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
+            m = re.search(r"\{.*\}", text, re.S)
+            try:
+                return model_cls.model_validate(_json.loads(m.group(0) if m else text))
+            except (ValueError, ValidationError) as e:
+                error = str(e)
+                log.warning("OpenRouter structured output invalid (try %d): %s", attempt + 1, error[:200])
+        raise RuntimeError(f"no valid structured output from OpenRouter: {error[:300]}")
+
+
 # --------------------------------------------------------------------------- selection
 
 _cache: dict[str, object] = {}
@@ -183,9 +285,9 @@ _cache: dict[str, object] = {}
 def get():
     name = (settings.llm_provider or "anthropic").lower()
     if name not in PROVIDERS:
-        raise ValueError(f"Unknown LLM_PROVIDER '{name}' (use 'anthropic' or 'openai')")
+        raise ValueError(f"Unknown LLM_PROVIDER '{name}' (use 'anthropic', 'openai' or 'openrouter')")
     if name not in _cache:
-        _cache[name] = OpenAIProvider() if name == "openai" else AnthropicProvider()
+        _cache[name] = {"openai": OpenAIProvider, "openrouter": OpenRouterProvider}.get(name, AnthropicProvider)()
     return _cache[name]
 
 
@@ -196,7 +298,7 @@ def reset() -> None:
 
 def describe() -> str:
     p = (settings.llm_provider or "anthropic").lower()
-    return f"{p}:{settings.openai_model if p == 'openai' else settings.claude_model}"
+    return f"{p}:" + {"openai": settings.openai_model, "openrouter": settings.openrouter_text_model}.get(p, settings.claude_model)
 
 
 # exact messages of the Anthropic / OpenAI SDKs for a missing or rejected key (not other services' 401s)
@@ -210,8 +312,8 @@ def friendly_error(message: str) -> str:
 
     low = (message or "").lower()
     if any(h in low for h in _KEY_HINTS):
-        name = "OpenAI" if settings.llm_provider == "openai" else "Anthropic"
-        env = "OPENAI_API_KEY" if settings.llm_provider == "openai" else "ANTHROPIC_API_KEY"
+        name, env = {"openai": ("OpenAI", "OPENAI_API_KEY"), "openrouter": ("OpenRouter", "OPENROUTER_API_KEY")}.get(
+            settings.llm_provider, ("Anthropic", "ANTHROPIC_API_KEY"))
         return (f"The AI provider ({name}) has no valid API key. Add it in the panel under Settings -> Keys "
                 f"(or {env} in .env, then recreate the container).")
     return message

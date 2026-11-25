@@ -199,7 +199,8 @@ class Schedule(Timing):
 
 
 class General(BaseModel):
-    llm_provider: Literal["anthropic", "openai"] = "anthropic"
+    llm_provider: Literal["anthropic", "openai", "openrouter"] = "anthropic"
+    openrouter_text_model: str = "anthropic/claude-sonnet-5.5"  # research + writing when the provider is OpenRouter
     claude_model: str = "claude-opus-5-5"
     openai_model: str = "gpt-5.5"
     brand_name: str = "Indira Pathshala"
@@ -267,7 +268,8 @@ def control_path() -> Path:
 def _seed_from_env() -> ControlConfig:
     cfg = ControlConfig()
     g = cfg.general
-    g.llm_provider = "openai" if settings.llm_provider == "openai" else "anthropic"
+    g.llm_provider = settings.llm_provider if settings.llm_provider in ("openai", "openrouter") else "anthropic"  # type: ignore[assignment]
+    g.openrouter_text_model = settings.openrouter_text_model
     g.claude_model, g.openai_model = settings.claude_model, settings.openai_model
     g.brand_name, g.brand_handle = settings.brand_name, settings.brand_handle
     g.copyright_owner, g.timezone = settings.copyright_owner, settings.post_timezone
@@ -399,6 +401,7 @@ def apply(cfg: ControlConfig) -> None:
         "openai_model": g.openai_model.strip() or settings.openai_model,
         "akhbar_title_hi": g.akhbar_title_hi, "akhbar_title_en": g.akhbar_title_en, "akhbar_articles": g.akhbar_articles,
         "openrouter_model": g.openrouter_model.strip() or settings.openrouter_model,
+        "openrouter_text_model": g.openrouter_text_model.strip() or settings.openrouter_text_model,
         "openrouter_fallback": g.openrouter_fallback.strip(),
         "public_base_url": (g.public_base_url.strip() or settings.public_base_url).rstrip("/"),
     }.items():
@@ -409,8 +412,11 @@ def apply(cfg: ControlConfig) -> None:
         object.__setattr__(settings, "elevenlabs_api_key", s.elevenlabs_api_key)
     if s.gemini_api_key:
         object.__setattr__(settings, "gemini_api_key", s.gemini_api_key)
-    if s.openrouter_api_key:
+    if s.openrouter_api_key and s.openrouter_api_key != settings.openrouter_api_key:
         object.__setattr__(settings, "openrouter_api_key", s.openrouter_api_key)
+        from . import providers as _providers
+
+        _providers.reset()  # OpenRouter client reads the key when it is created
     from . import providers
 
     changed = False

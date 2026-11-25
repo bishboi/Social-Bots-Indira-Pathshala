@@ -51,6 +51,10 @@ OPENAI_MODEL=gpt-5.5         # any OpenAI model with the web_search tool + struc
 
 You only need the key for the provider you use. Switching takes effect on the next run, with no restart.
 
+### OpenRouter as the AI provider
+
+Set the provider to **OpenRouter** (Settings → AI provider, or `LLM_PROVIDER=openrouter`) to run everything (research, writing, checking) through one OpenRouter key on any model it offers. The default is `anthropic/claude-sonnet-5.5`; change it with `OPENROUTER_TEXT_MODEL` or in the panel. Web research uses OpenRouter's web plugin. The same key also draws the test-series diagrams.
+
 ## Database (Supabase)
 
 On a server, keep the app's data in **Supabase** so nothing is lost on restarts or redeploys. That covers the run history (which prevents repeated topics and headlines), the generated quizzes used by `/quiz`, and every admin-panel setting (spaces, channels, custom exams, newspaper schedules, editions and keys).
