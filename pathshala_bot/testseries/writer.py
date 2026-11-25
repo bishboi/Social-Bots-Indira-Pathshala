@@ -151,7 +151,7 @@ def _closest(topic: str, topics: list[str]) -> str | None:
 
 
 COMPLETE = 0.95  # a past paper needs this share of its questions (the rest: questions the official key deleted)
-MAX_KEY_DISAGREEMENT = 0.35
+MAX_KEY_DISAGREEMENT = 0.55  # a wrong-booklet/shift key disagrees ~randomly (>55%); a correct key on a hard subject disagrees less, and those are flagged
 
 
 def _sitting(text: str) -> str:
@@ -299,8 +299,9 @@ def _paper_order(qs: list) -> list:
 def trusted(exam: Exam, questions: list, language: str, sample: int = 20) -> bool:
     """Do these answers belong to these questions? An independent solve of a sample must mostly agree.
 
-    A few disagreements are normal (disputed questions are flagged later); a third or more means the answers came
-    from another booklet, shift or paper."""
+    Many disagreements (over half) mean the answers came from another booklet, shift or paper and the whole copy is
+    unusable. Fewer are normal - hard or disputed questions (especially Hindi grammar) where the official key stands
+    and each disagreement is flagged for review."""
     part = questions[:sample]
     if len(part) < 5:
         return True
