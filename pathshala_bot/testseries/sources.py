@@ -21,7 +21,7 @@ import httpx
 
 log = logging.getLogger(__name__)
 MAX_BYTES = 15_000_000
-MAX_CHARS = 60_000
+MAX_CHARS = 150_000  # a full 100-question paper with its answer key can be long
 UA = "Mozilla/5.0 (compatible; exam-prep-research/1.0)"
 
 

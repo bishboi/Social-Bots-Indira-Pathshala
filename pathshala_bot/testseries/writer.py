@@ -233,11 +233,12 @@ List each URL on its own line under "URLS:" with what it contains (complete or p
     # each candidate document on its own: a paper is never pieced together from several sources
     candidates: dict[str, list] = {}
     chunks: list[tuple[str, str]] = []
-    for url, text in found.papers:
-        step, size = 15000, 18000  # overlapping excerpts, so no question is lost at a boundary
-        chunks += [(url, text[i:i + size]) for i in range(0, max(1, len(text) - (size - step)), step)]
+    for url, text in found.papers:  # read each source fully, in overlapping excerpts so no question is lost at a boundary
+        step, size = 12000, 15000
+        chunks += [(url, text[i:i + size]) for i in range(0, max(1, len(text) - (size - step)), step)][:10]
+    chunks = chunks[:36]
     with ThreadPoolExecutor(PARALLEL) as pool:
-        for chunk, qs in zip(chunks[:24], pool.map(extract, chunks[:24])):
+        for chunk, qs in zip(chunks, pool.map(extract, chunks)):
             for q in qs:
                 q.source_url = chunk[0]
                 candidates.setdefault(chunk[0], []).append(q)
