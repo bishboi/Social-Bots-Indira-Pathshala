@@ -28,6 +28,12 @@ class Research:
     sources: list[dict] = field(default_factory=list)
 
 
+def _b64(data: bytes) -> str:
+    import base64
+
+    return base64.b64encode(data).decode()
+
+
 def _finish_research(text_parts: list[str], sources: dict[str, str]) -> Research:
     notes = "".join(text_parts).strip()
     if not notes:
@@ -87,11 +93,14 @@ class AnthropicProvider:
             break
         return _finish_research(text_parts, sources)
 
-    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None):
+    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None,
+                   images: list[bytes] | None = None):
+        content = [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _b64(i)}} for i in images or []]
         with self.client.beta.messages.stream(
             model=self.model, max_tokens=max_tokens, betas=[self.FALLBACK_BETA], fallbacks="default",
             output_config={"effort": effort or settings.generation_effort},
-            system=system, messages=[{"role": "user", "content": user}], output_format=model_cls,
+            system=system, messages=[{"role": "user", "content": content + [{"type": "text", "text": user}] if images else user}],
+            output_format=model_cls,
         ) as stream:
             resp = stream.get_final_message()
         self._check_refusal(resp)
@@ -160,10 +169,14 @@ class OpenAIProvider:
             raise RuntimeError(f"OpenAI research incomplete: {resp.incomplete_details}")
         return _finish_research([resp.output_text or ""], sources)
 
-    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None):
+    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None,
+                   images: list[bytes] | None = None):
+        inp = user if not images else [{"role": "user", "content": [
+            *({"type": "input_image", "image_url": f"data:image/png;base64,{_b64(i)}"} for i in images),
+            {"type": "input_text", "text": user}]}]
         resp = self._create(
             self.client.responses.parse,
-            model=self.model, instructions=system, input=user, text_format=model_cls,
+            model=self.model, instructions=system, input=inp, text_format=model_cls,
             max_output_tokens=max_tokens, reasoning={"effort": effort or settings.generation_effort},
         )
         if (r := self._refusal(resp)) is not None:
@@ -245,15 +258,18 @@ class OpenRouterProvider:
             content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
         return _finish_research([content], sources)
 
-    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None):
+    def structured(self, system: str, user: str, model_cls, max_tokens: int = 32000, effort: str | None = None,
+                   images: list[bytes] | None = None):
         import json as _json
         import re
 
         from pydantic import ValidationError
 
         schema = model_cls.model_json_schema()
-        messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": user + "\n\nReply with one JSON object that follows the given schema."}]
+        text = user + "\n\nReply with one JSON object that follows the given schema."
+        content = [*({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_b64(i)}"}} for i in images),
+                   {"type": "text", "text": text}] if images else text
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": content}]
         error = ""
         for attempt in range(3):
             msgs = messages + ([{"role": "user", "content": f"Your previous reply was not valid: {error[:800]}. Reply again with valid JSON only."}]

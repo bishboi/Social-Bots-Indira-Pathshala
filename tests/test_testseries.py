@@ -240,13 +240,19 @@ def test_pyq_paper_keeps_official_key_and_flags_disagreement(ctl, monkeypatch):
     monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(
         notes="URLS:\nhttps://rpsc.example/2021.pdf - full paper", sources=[{"title": "RPSC", "url": "https://rpsc.example/2021.pdf"}]))
     fetched = []
-    monkeypatch.setattr(sources, "gather", lambda urls, limit=6: fetched.append(urls) or [("https://rpsc.example/2021.pdf", "1. Q ... Ans (b) " * 100)])
+    def fake_gather(urls, limit=6, keyword=""):
+        fetched.append(urls)
+        f = sources.Found()
+        f.papers = [("https://rpsc.example/2021.pdf", "1. Q ... Ans (b) " * 100)]
+        return f
+
+    monkeypatch.setattr(sources, "gather", fake_gather)
 
     def fake_structured(system, user, model, **kw):
         if model is PaperQuestions:
             sec = "Hindi" if '"Hindi"' in system else "Reasoning"
             d = _draft("Sandhi" if sec == "Hindi" else "Series", 1 if sec == "Hindi" else 2)
-            return PaperQuestions(questions=[PaperQuestion(topic=d.topic, question=d.question, options=d.options, correct_index=1,
+            return PaperQuestions(questions=[PaperQuestion(number=1, topic=d.topic, question=d.question, options=d.options, correct_index=1,
                                                            needs_diagram=False, diagram_brief="", pyq_reference="",
                                                            source_url="https://rpsc.example/2021.pdf")])
         if model is HelpBatch:
@@ -329,3 +335,59 @@ def test_revealing_hint_is_rewritten_not_rejected(monkeypatch):
     monkeypatch.setattr(llm, "structured", fake)
     assert writer.check(load_exams()["rajasthan-si"], drafts, "hi") == ["", ""]  # both kept
     assert drafts[0].hint == "think about Sandhi" and drafts[1].hint == "recall the rule for vowel sandhi"
+
+
+def test_scanned_paper_is_read_with_the_official_key(monkeypatch):
+    from pathshala_bot.config import load_exams
+    from pathshala_bot.testseries import sources
+    from pathshala_bot.testseries.models import Help, HelpBatch, PaperQuestion, PaperQuestions
+
+    bp = make_bp()
+    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="URLS:\nhttps://x.example/hindi-2021.pdf", sources=[]))
+
+    def fake_gather(urls, limit=6, keyword=""):
+        f = sources.Found()
+        f.scanned = [("https://x.example/hindi-2021.pdf", b"%PDF scanned")]
+        f.keys = [("https://x.example/key.pdf", "Model Answer Key  Q. No. RES\n 1  4\n 2  2")]
+        return f
+
+    monkeypatch.setattr(sources, "gather", fake_gather)
+    monkeypatch.setattr(sources, "page_images", lambda pdf, **k: [b"png1", b"png2", b"png3", b"png4"])
+    seen = []
+
+    def fake(system, user, model, images=None, **kw):
+        if model is PaperQuestions:
+            seen.append((len(images), "Model Answer Key" in user, "pen marks" in system))
+            n = len(seen)
+            return PaperQuestions(questions=[PaperQuestion(number=n, topic="Sandhi", question=_stem("Sandhi", n), options=["a", "b", "c", "d"],
+                                                           correct_index=3, needs_diagram=False, diagram_brief="", pyq_reference="",
+                                                           source_url="https://x.example/hindi-2021.pdf")])
+        if model is Verdicts:  # the independent solve agrees with the key
+            return Verdicts(verdicts=[Verdict(number=1, answer_index=3, problem="", hint_reveals=False)])
+        return HelpBatch(items=[Help(number=i + 1, hint="h", solution="s", explanation="e") for i in range(2)])
+
+    monkeypatch.setattr(llm, "structured", fake)
+    qs = writer.find_pyqs(load_exams()["rajasthan-si"], bp, bp.sections[0], "2021", "hi")
+    assert sorted(seen) == [(1, True, True), (3, True, True)]  # pages in groups of 3, with the key, ignoring pen marks
+    assert len(qs) == 2 and all(q.correct_index == 3 for q in qs)
+
+
+def test_source_with_a_mismatched_key_is_dropped(monkeypatch):
+    from pathshala_bot.config import load_exams
+    from pathshala_bot.testseries.models import PaperQuestion
+
+    def pq(n, src):
+        return PaperQuestion(number=n, topic="Sandhi", question=_stem(src, n), options=["a", "b", "c", "d"], correct_index=0,
+                             needs_diagram=False, diagram_brief="", pyq_reference="", source_url=src)
+
+    qs = [pq(i, "good") for i in range(10)] + [pq(i, "bad") for i in range(10)]
+
+    def fake(system, user, model, **kw):
+        bad = "bad" in user
+        n = user.count("\nQ") + 1
+        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=(2 if bad and i % 2 == 0 else 0), problem="", hint_reveals=False)
+                                  for i in range(n)])
+
+    monkeypatch.setattr(llm, "structured", fake)
+    kept = writer.trusted(load_exams()["rajasthan-si"], qs, "hi")
+    assert {q.source_url for q in kept} == {"good"} and len(kept) == 10

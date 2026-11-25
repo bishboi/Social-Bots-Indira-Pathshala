@@ -84,6 +84,7 @@ class QuestionBatch(BaseModel):
 class PaperQuestion(BaseModel):
     """A question copied from a real past paper (help text is written afterwards)."""
 
+    number: int = Field(description="The question's number as printed in the paper (0 if not numbered).")
     topic: str = Field(description="The closest topic from the list given.")
     question: str = Field(description="The question exactly as in the paper (translated only if the paper's language differs).")
     options: list[str] = Field(description="The options exactly as in the paper, no 'A)' prefixes.")

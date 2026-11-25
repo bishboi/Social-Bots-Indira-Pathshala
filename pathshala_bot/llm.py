@@ -290,6 +290,8 @@ def web_research(prompt: str, max_searches: int) -> Research:
     return providers.get().web_research(prompt, max_searches)
 
 
-def structured(system: str, user: str, model, max_tokens: int = 32000, effort: str | None = None):
-    """One structured-output call returning a validated pydantic object (current provider)."""
+def structured(system: str, user: str, model, max_tokens: int = 32000, effort: str | None = None, images: list[bytes] | None = None):
+    """One structured-output call returning a validated pydantic object (current provider). images: PNG pages to read."""
+    if images:
+        return providers.get().structured(system, user, model, max_tokens=max_tokens, effort=effort, images=images)
     return providers.get().structured(system, user, model, max_tokens=max_tokens, effort=effort)

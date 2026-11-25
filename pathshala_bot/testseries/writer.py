@@ -161,41 +161,77 @@ body's website first), and reputable sites that reproduce the complete paper wit
 List every such URL on its own line under "URLS:" (direct PDF links are best), most complete first, and say for each what
 it contains. Note the exam date/shift. If the paper of {year} was never held or isn't published anywhere, say NO PAPER FOUND.""",
                                 settings.max_web_searches)
-    urls = [s["url"] for s in research.sources] + re.findall(r"https?://[^\s<>\"')\]]+", research.notes)
-    docs = web.gather(urls, limit=6)
-    log.info("%s %s %s: read %d of %d source(s)", exam.short_name, year, section.subject, len(docs), len(set(urls)))
-    if not docs:
-        return []
-    chunks: list[tuple[str, str]] = []
-    for url, text in docs:
-        for i in range(0, len(text), 18000):
-            chunks.append((url, text[i:i + 18000]))
-    chunks = chunks[:14]
+    named = re.findall(r"https?://[^\s<>\"')\]]+", research.notes)  # the URLs research names as the paper come first
+    urls = named + [s["url"] for s in research.sources]
+    found = web.gather(urls, limit=6, keyword=f"{section.subject} {year}")
     topics = ", ".join(t.topic for t in section.topics)
+    rules = f"""- Only questions of the section/paper "{section.subject}" of {exam.name} {year}. If the material belongs to another
+  exam, year or paper, return an empty list. Never add, invent, complete or re-word questions.
+- Keep the wording; translate only if the paper's language differs: {_lang(language)}
+- options: only the real answer options, exactly as printed, without numbering. Leave out an extra option meaning
+  "unattempted / not answered" (e.g. 'अनुत्तरित प्रश्न').
+- topic: the closest of: {topics}.
+- pyq_reference '{exam.short_name} {year}' (+ shift/date if known).
+- needs_diagram only if the question has a figure; then describe the figure exactly in diagram_brief."""
+    keys = "\n\n".join(f"ANSWER KEY ({u}):\n{t[:12000]}" for u, t in found.keys[:3])
 
     def extract(chunk: tuple[str, str]):
         url, text = chunk
         try:
             return llm.structured(
-                f"""You copy real previous-year questions of {exam.name} {year} from a document into structured form.
-- Only questions of the section/paper "{section.subject}" that the document gives WITH all options and an answer
-  (answer key, marked answer or "Ans:"). Never add, invent, complete or re-word questions.
-- If the document belongs to another exam or year, or has no questions with answers, return an empty list.
-- Keep the wording; translate only if the paper's language differs: {_lang(language)}
-- options exactly as in the paper (drop 'A)' prefixes); correct_index from the key.
-- pyq_reference '{exam.short_name} {year}' (+ shift/date if given); source_url: {url}
-- topic: the closest of: {topics}.
-- needs_diagram only if the question has a figure; then describe it exactly in diagram_brief.""",
+                f"""You copy real previous-year questions from a document into structured form.
+{rules}
+- Only questions the document gives WITH an answer (answer key, marked answer or "Ans:"); correct_index from that answer.
+- source_url: {url}""",
                 f"DOCUMENT ({url}):\n{text}", PaperQuestions, max_tokens=24000, effort="low").questions
         except Exception:
             log.exception("PYQ extraction failed for %s", url)
             return []
 
+    def ocr(job: tuple[str, list[bytes], int]):
+        url, pages, first = job
+        try:
+            return llm.structured(
+                f"""You transcribe a scanned question paper (page images) into structured form, accurately, character by character.
+{rules}
+- Ignore pen marks, ticks and notes made by a candidate: they are NOT answers.
+- correct_index comes ONLY from the official answer key below, by question number (keys number options from 1, so
+  correct_index = key value - 1). Pick the key of the same paper (subject, date/shift). Skip a question if the key
+  has no usable answer for it (deleted / cancelled / missing).
+- Questions cut off at the page edge: skip them.
+- source_url: {url}""",
+                f"Pages {first + 1}-{first + len(pages)} of the paper.\n\n{keys}", PaperQuestions,
+                max_tokens=24000, effort="low", images=pages).questions
+        except Exception:
+            log.exception("OCR failed for %s pages %d+", url, first + 1)
+            return []
+
+    chunks: list[tuple[str, str]] = []
+    for url, text in found.papers:
+        for i in range(0, len(text), 18000):
+            chunks.append((url, text[i:i + 18000]))
     with ThreadPoolExecutor(PARALLEL) as pool:
-        found = [q for qs in pool.map(extract, chunks) for q in qs]
+        found_qs = [q for qs in pool.map(extract, chunks[:14]) for q in qs]
+    found_qs = trusted(exam, found_qs, language)
+    if len(found_qs) < 0.6 * section.questions and found.scanned and found.keys:
+        for url, pdf in found.scanned[:3]:  # scanned paper: read the pages, answers from the official key
+            pages = web.page_images(pdf)
+            jobs = [(url, pages[i:i + 3], i) for i in range(0, len(pages), 3)]
+            with ThreadPoolExecutor(PARALLEL) as pool:
+                got = [q for qs in pool.map(ocr, jobs) for q in qs]
+            log.info("OCR of %s: %d page(s) -> %d question(s)", url, len(pages), len(got))
+            got = trusted(exam, got, language)  # a key from another shift/paper shows up as disagreement
+            found_qs += got
+            if len(got) >= 0.6 * section.questions:
+                break
+    per_source: dict[str, int] = {}
+    for q in found_qs:
+        per_source[q.source_url] = per_source.get(q.source_url, 0) + 1
+    # one paper (one source / shift) in its own order; other sources only top it up
+    found_qs.sort(key=lambda q: (-per_source[q.source_url], q.source_url, q.number or 10**6))
     seen: list[str] = []
     raw = []
-    for q in found:
+    for q in found_qs:
         opts = [o.strip() for o in q.options]
         if len(opts) < 2 or not all(opts) or not 0 <= q.correct_index < len(opts) or is_duplicate(q.question, seen):
             continue
@@ -212,6 +248,36 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
                                  difficulty="medium", needs_diagram=q.needs_diagram, diagram_brief=q.diagram_brief,
                                  pyq_reference=q.pyq_reference.strip() or f"{exam.short_name} {year}", source_url=q.source_url))
     return [d for d in out if d.solution]
+
+
+MAX_KEY_DISAGREEMENT = 0.35
+
+
+def trusted(exam: Exam, questions: list, language: str, sample: int = 20) -> list:
+    """Drop sources whose answers don't match an independent solve (wrong key, other shift, copying errors).
+
+    A few disagreements are normal (hard or disputed questions are flagged later); a third or more means the
+    answers don't belong to these questions."""
+    by_src: dict[str, list] = {}
+    for q in questions:
+        by_src.setdefault(q.source_url, []).append(q)
+    keep = []
+    for url, qs in by_src.items():
+        part = qs[:sample]
+        if len(part) < 5:
+            keep += qs
+            continue
+        drafts = [QuestionDraft(topic=q.topic, question=q.question, options=q.options, correct_index=q.correct_index, hint="",
+                                solution="", explanation="", difficulty="medium", needs_diagram=q.needs_diagram,
+                                diagram_brief=q.diagram_brief, pyq_reference="", source_url=url) for q in part]
+        problems = check(exam, drafts, language)
+        wrong = sum(1 for p in problems if p.startswith("checker chose"))
+        if len(part) >= 5 and wrong / len(part) > MAX_KEY_DISAGREEMENT:  # tiny samples are noise
+            log.warning("dropping %d question(s) from %s: %d of %d answers disagree with an independent solve",
+                        len(qs), url, wrong, len(part))
+            continue
+        keep += qs
+    return keep
 
 
 def explain(exam: Exam, questions, language: str) -> list[tuple[str, str, str]]:
