@@ -391,3 +391,22 @@ def test_source_with_a_mismatched_key_is_dropped(monkeypatch):
     monkeypatch.setattr(llm, "structured", fake)
     kept = writer.trusted(load_exams()["rajasthan-si"], qs, "hi")
     assert {q.source_url for q in kept} == {"good"} and len(kept) == 10
+
+
+def test_short_tests_are_topped_up(ctl, monkeypatch):
+    cfg, ts = _series_cfg(ctl, access="free")
+    ts.stages[0].enabled = False
+    builder.save_blueprint(ts, make_bp())
+    _fake_agents(monkeypatch)
+    spec = next(s for s in builder.plan(ts, make_bp()) if s.id == "subject-hindi-1")
+    test = builder.build_test(cfg, ts, spec, make_bp())
+    drop = test.sections[0].question_ids[:5]  # pretend 5 questions failed the check
+    test.sections[0].question_ids = test.sections[0].question_ids[5:]
+    test.questions = [q for q in test.questions if q.id not in drop]
+    builder.save_test(test)
+    assert [s.id for s, _ in builder.short_tests(ts, make_bp())] == ["subject-hindi-1"]
+    out = builder.run(cfg, ts, what="next", dry_run=True)
+    assert out.splitlines()[0] == "➕ Hindi · Test 1: 20 -> 25 questions"
+    t = builder.load_test("si", "subject-hindi-1")
+    assert len(t.questions) == 25 and len(t.sections[0].question_ids) == 25 and not t.note
+    assert not builder.short_tests(ts, make_bp())

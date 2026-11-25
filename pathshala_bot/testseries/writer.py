@@ -26,7 +26,8 @@ log = logging.getLogger(__name__)
 
 BATCH = 10  # questions per writer call (each carries a hint and a detailed explanation)
 CHECK_BATCH = 20  # questions per checker call
-REFILL_ROUNDS = 2
+REFILL_ROUNDS = 4
+OVERWRITE = 1.4  # rewrite rounds ask for this many times the missing count (some are rejected again)
 PARALLEL = 4
 
 
@@ -412,6 +413,10 @@ def build_section(exam: Exam, bp: Blueprint, section: Section, plan: list[tuple[
         missing = [(t, n - have.get(t, 0)) for t, n in want.items() if n - have.get(t, 0) > 0]
         if not missing:
             break
+        if rnd:
+            import math
+
+            missing = [(t, math.ceil(n * OVERWRITE)) for t, n in missing]
         size = sum(n for _, n in missing)
         if progress:
             progress(f"{section.subject}: writing {size} question(s)" + (f" (rewrite round {rnd})" if rnd else ""))
@@ -430,6 +435,8 @@ def build_section(exam: Exam, bp: Blueprint, section: Section, plan: list[tuple[
                 continue
             if d.needs_diagram and not svg:
                 continue  # unanswerable without its figure
+            if sum(1 for q in done if q.topic == d.topic) >= want.get(d.topic, 0):
+                continue  # extra from an over-asked rewrite round
             done.append(to_question(d, section.subject, svg))
     order = {t: i for i, (t, _) in enumerate(plan)}
     return sorted(done, key=lambda q: order.get(q.topic, 99))

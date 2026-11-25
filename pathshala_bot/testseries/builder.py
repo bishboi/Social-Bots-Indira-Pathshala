@@ -229,6 +229,60 @@ def mark_skipped(series_id: str, test_id: str, reason: str) -> None:
                                                ensure_ascii=False), encoding="utf-8")
 
 
+def short_tests(series: control.TestSeries, bp: Blueprint) -> list[tuple[TestSpec, Test]]:
+    """Built subject / full tests with fewer questions than planned (some failed the answer check)."""
+    have = built(series.id)
+    out = []
+    for spec in plan(series, bp):
+        t = have.get(spec.id)
+        if t is not None and spec.kind != "pyq" and len(t.questions) < spec.questions:
+            out.append((spec, t))
+    return out
+
+
+def top_up(cfg: control.ControlConfig, series: control.TestSeries, spec: TestSpec, test: Test, bp: Blueprint, progress=None) -> Test:
+    """Write only the missing questions of a test (per section and topic) and render it again."""
+    exam = exam_for(cfg, series)
+    secs = [bp.section(spec.subject)] if spec.kind == "subject" else bp.sections
+    by_section = {s.subject: s for s in test.sections}
+    qs = test.by_id()
+    for sec in secs:
+        if sec is None:
+            continue
+        n = spec.questions if spec.kind == "subject" else sec.questions
+        ts = by_section.get(sec.subject)
+        current = [qs[i] for i in (ts.question_ids if ts else []) if i in qs]
+        have: dict[str, int] = {}
+        for q in current:
+            have[q.topic] = have.get(q.topic, 0) + 1
+        missing = [(t, c - have.get(t, 0)) for t, c in bpmod.topic_plan(sec, n, spec.number) if c - have.get(t, 0) > 0]
+        short = n - len(current)
+        if short <= 0:
+            continue
+        if sum(c for _, c in missing) < short:  # topics renamed since: fill with the section's mix
+            missing = bpmod.topic_plan(sec, short, spec.number)
+        if progress:
+            progress(f"{spec.title} · {sec.subject}: topping up {short} question(s)")
+        new = writer.build_section(exam, bp, sec, missing, bpmod.difficulty_split(bp, short), exam.language,
+                                   used_stems(series.id, sec.subject), series.diagrams, series.focus, progress)[:short]
+        if ts is None:
+            ts = TestSection(subject=sec.subject, marks_per_question=sec.marks_per_question, negative_marks=sec.negative_marks, question_ids=[])
+            test.sections.append(ts)
+        ts.question_ids += [q.id for q in new]
+        test.questions += new
+    planned = spec.questions
+    test.note = "" if len(test.questions) >= planned else f"{len(test.questions)} of {planned} planned questions passed the answer check."
+    test.duration_minutes = bp.duration_minutes if spec.kind == "full" and not test.note else bpmod.scaled_minutes(bp, len(test.questions))
+    d = save_test(test)
+    try:
+        from . import render
+
+        render.render_pdfs(test, exam, bp, d)
+    except Exception:
+        log.exception("test PDFs failed")
+    return test
+
+
 def next_spec(series: control.TestSeries, bp: Blueprint) -> TestSpec | None:
     have, skip = built(series.id), skipped(series.id)
     return next((s for s in plan(series, bp) if s.id not in have and s.id not in skip), None)
@@ -243,6 +297,14 @@ def run(cfg: control.ControlConfig, series: control.TestSeries, what: str = "nex
         return f"{series.name}: pattern researched - {describe_blueprint(bp)}"
     bp = ensure_blueprint(cfg, series)
     lines = []
+    for spec, test in short_tests(series, bp):  # finish incomplete tests first
+        before = len(test.questions)
+        try:
+            test = top_up(cfg, series, spec, test, bp, progress)
+            lines.append(f"➕ {test.title}: {before} -> {len(test.questions)} questions")
+        except Exception as e:  # noqa: BLE001
+            log.exception("top-up of %s failed", spec.id)
+            lines.append(f"❌ top-up {spec.title}: {str(e)[:200]}")
     while True:
         spec = next_spec(series, bp)
         if spec is None:
