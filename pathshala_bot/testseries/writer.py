@@ -150,17 +150,36 @@ def _closest(topic: str, topics: list[str]) -> str | None:
     return next((t for t in topics if _norm(t) == hit[0]), None) if hit else None
 
 
-def find_pyqs(exam: Exam, bp: Blueprint, section: Section, year: str, language: str) -> list[QuestionDraft]:
-    """Real questions of one section of the <year> paper: search, read the paper / answer-key pages, copy, then explain."""
+COMPLETE = 0.95  # a past paper needs this share of its questions (the rest: questions the official key deleted)
+MAX_KEY_DISAGREEMENT = 0.35
+
+
+class PaperNotFound(RuntimeError):
+    """No complete copy of a past paper with its official answers could be found."""
+
+
+def _sitting(text: str) -> str:
+    """'13-09-2021' from a date in any common numeric format ('' if none)."""
+    m = re.search(r"(\d{1,2})[-./ ](\d{1,2})[-./ ](\d{4})", text or "")
+    return f"{int(m.group(1)):02d}-{int(m.group(2)):02d}-{m.group(3)}" if m else ""
+
+
+def find_pyqs(exam: Exam, bp: Blueprint, section: Section, year: str, language: str,
+              prefer_sitting: str = "") -> tuple[list[QuestionDraft], str, str]:
+    """One complete section of a real <year> paper, from ONE document, with that paper's official answers.
+
+    Returns (questions in paper order, sitting date, source URL). Raises PaperNotFound when no single source has the
+    complete section with answers that belong to it. prefer_sitting: the date of the other paper(s) of this test."""
     from .. import llm
     from . import sources as web
 
     research = llm.web_research(f"""Find where the ACTUAL questions of the {exam.name} {year} question paper, section/paper
-"{section.subject}", are published in full with answers: the official question paper and answer key PDFs (conducting
-body's website first), and reputable sites that reproduce the complete paper with the official answer key (e.g. pages titled
-"{exam.short_name} {year} question paper with answer key", "{year} solved paper").
+"{section.subject}", are published COMPLETE ({section.questions} questions) with the OFFICIAL answers: the conducting body's
+question paper and answer key PDFs first, then reputable sites that reproduce the whole paper with the official answer key
+(e.g. "{exam.short_name} {year} question paper with answer key", "{year} solved paper").
+{('Prefer the paper of the sitting held on ' + prefer_sitting + '.') if prefer_sitting else ''}
 List every such URL on its own line under "URLS:" (direct PDF links are best), most complete first, and say for each what
-it contains. Note the exam date/shift. If the paper of {year} was never held or isn't published anywhere, say NO PAPER FOUND.""",
+it contains and the exam date/shift. If the paper of {year} was never held or isn't published anywhere, say NO PAPER FOUND.""",
                                 settings.max_web_searches)
     named = re.findall(r"https?://[^\s<>\"')\]]+", research.notes)  # the URLs research names as the paper come first
     urls = named + [s["url"] for s in research.sources]
@@ -168,11 +187,12 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
     topics = ", ".join(t.topic for t in section.topics)
     rules = f"""- Only questions of the section/paper "{section.subject}" of {exam.name} {year}. If the material belongs to another
   exam, year or paper, return an empty list. Never add, invent, complete or re-word questions.
+- number: the question number as printed.
 - Keep the wording; translate only if the paper's language differs: {_lang(language)}
 - options: only the real answer options, exactly as printed, without numbering. Leave out an extra option meaning
   "unattempted / not answered" (e.g. 'अनुत्तरित प्रश्न').
 - topic: the closest of: {topics}.
-- pyq_reference '{exam.short_name} {year}' (+ shift/date if known).
+- pyq_reference '{exam.short_name} {year}'; sitting: the paper's date (and shift) as printed, DD-MM-YYYY.
 - needs_diagram only if the question has a figure; then describe the figure exactly in diagram_brief."""
     keys = "\n\n".join(f"ANSWER KEY ({u}):\n{t[:12000]}" for u, t in found.keys[:3])
 
@@ -183,6 +203,7 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
                 f"""You copy real previous-year questions from a document into structured form.
 {rules}
 - Only questions the document gives WITH an answer (answer key, marked answer or "Ans:"); correct_index from that answer.
+- Skip a question cut off at the start or end of the excerpt.
 - source_url: {url}""",
                 f"DOCUMENT ({url}):\n{text}", PaperQuestions, max_tokens=24000, effort="low").questions
         except Exception:
@@ -197,7 +218,7 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
 {rules}
 - Ignore pen marks, ticks and notes made by a candidate: they are NOT answers.
 - correct_index comes ONLY from the official answer key below, by question number (keys number options from 1, so
-  correct_index = key value - 1). Pick the key of the same paper (subject, date/shift). Skip a question if the key
+  correct_index = key value - 1). Use only the key of this same paper (subject, date/shift). Skip a question if the key
   has no usable answer for it (deleted / cancelled / missing).
 - Questions cut off at the page edge: skip them.
 - source_url: {url}""",
@@ -207,126 +228,93 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
             log.exception("OCR failed for %s pages %d+", url, first + 1)
             return []
 
+    # each candidate document on its own: a paper is never pieced together from several sources
+    candidates: dict[str, list] = {}
     chunks: list[tuple[str, str]] = []
     for url, text in found.papers:
-        for i in range(0, len(text), 18000):
-            chunks.append((url, text[i:i + 18000]))
+        step, size = 15000, 18000  # overlapping excerpts, so no question is lost at a boundary
+        chunks += [(url, text[i:i + size]) for i in range(0, max(1, len(text) - (size - step)), step)]
     with ThreadPoolExecutor(PARALLEL) as pool:
-        found_qs = [q for qs in pool.map(extract, chunks[:14]) for q in qs]
-    found_qs = trusted(exam, found_qs, language)
-    if len(found_qs) < 0.6 * section.questions and found.scanned and found.keys:
-        for url, pdf in found.scanned[:3]:  # scanned paper: read the pages, answers from the official key
-            pages = web.page_images(pdf)
-            jobs = [(url, pages[i:i + 3], i) for i in range(0, len(pages), 3)]
-            with ThreadPoolExecutor(PARALLEL) as pool:
-                got = [q for qs in pool.map(ocr, jobs) for q in qs]
-            log.info("OCR of %s: %d page(s) -> %d question(s)", url, len(pages), len(got))
-            got = trusted(exam, got, language, solve_unmatched=True)  # a key from another booklet/shift shows up as disagreement
-            found_qs += got
-            if len(got) >= 0.6 * section.questions:
-                break
-    per_source: dict[str, int] = {}
-    for q in found_qs:
-        per_source[q.source_url] = per_source.get(q.source_url, 0) + 1
-    # one paper (one source / shift) in its own order; other sources only top it up
-    found_qs.sort(key=lambda q: (-per_source[q.source_url], q.source_url, q.number or 10**6))
-    seen: list[str] = []
-    raw = []
-    for q in found_qs:
+        for chunk, qs in zip(chunks[:24], pool.map(extract, chunks[:24])):
+            for q in qs:
+                q.source_url = chunk[0]
+                candidates.setdefault(chunk[0], []).append(q)
+    for url, pdf in (found.scanned[:3] if found.keys else []):
+        pages = web.page_images(pdf)
+        jobs = [(url, pages[i:i + 3], i) for i in range(0, len(pages), 3)]
+        with ThreadPoolExecutor(PARALLEL) as pool:
+            got = [q for qs in pool.map(ocr, jobs) for q in qs]
+        log.info("OCR of %s: %d page(s) -> %d question(s)", url, len(pages), len(got))
+        for q in got:
+            q.source_url = url
+            candidates.setdefault(url, []).append(q)
+
+    need = int(section.questions * COMPLETE + 0.999)
+    reason = "no copy of this paper with its answers was found"
+    ranked = []
+    for url, qs in candidates.items():
+        qs = _paper_order(qs)
+        sitting = next((d for d in (_sitting(q.sitting) or _sitting(q.pyq_reference) for q in qs) if d), "")
+        ranked.append((len(qs) >= need, bool(prefer_sitting) and sitting == prefer_sitting, len(qs), url, qs, sitting))
+    ranked.sort(key=lambda r: (r[0], r[1], r[2]), reverse=True)
+    for complete, _, n, url, qs, sitting in ranked:
+        if not complete:
+            if reason.startswith("no copy"):
+                reason = f"the most complete copy found has {n} of {section.questions} questions ({url})"
+            break
+        if not trusted(exam, qs, language):  # answers from another booklet / shift / paper
+            reason = f"the answers in {url} don't belong to its questions"
+            continue
+        qs = qs[: section.questions]
+        helps = explain(exam, qs, language)
+        ref = f"{exam.short_name} {year}" + (f" ({sitting})" if sitting else "")
+        out = [QuestionDraft(topic=q.topic, question=q.question.strip(), options=[o.strip() for o in q.options],
+                             correct_index=q.correct_index, hint=h[0], solution=h[1], explanation=h[2], difficulty="medium",
+                             needs_diagram=q.needs_diagram, diagram_brief=q.diagram_brief, pyq_reference=ref, source_url=url)
+               for q, h in zip(qs, helps)]
+        if any(not d.solution for d in out):  # retry explanations once for the few that failed
+            missing = [i for i, d in enumerate(out) if not d.solution]
+            for i, h in zip(missing, explain(exam, [qs[i] for i in missing], language)):
+                out[i].hint, out[i].solution, out[i].explanation = h
+        if any(not d.solution for d in out):
+            reason = "explanations could not be written for every question"
+            continue
+        return out, sitting, url
+    raise PaperNotFound(f"{section.subject}: {reason}")
+
+
+def _paper_order(qs: list) -> list:
+    """One document's questions in paper order, each once (by number; a repeated stem with other options is kept)."""
+    out, seen = [], set()
+    for q in sorted(qs, key=lambda q: q.number or 10**6):
         opts = [o.strip() for o in q.options]
-        if len(opts) < 2 or not all(opts) or not 0 <= q.correct_index < len(opts) or is_duplicate(q.question, seen):
+        if len(opts) < 2 or not all(opts) or not 0 <= q.correct_index < len(opts):
             continue
-        seen.append(_norm(q.question))
-        raw.append(q)
-    raw = raw[: section.questions]
-    if not raw:
-        return []
-    helps = explain(exam, raw, language)
-    out = []
-    for q, h in zip(raw, helps):
-        out.append(QuestionDraft(topic=q.topic, question=q.question.strip(), options=[o.strip() for o in q.options],
-                                 correct_index=q.correct_index, hint=h[0], solution=h[1], explanation=h[2],
-                                 difficulty="medium", needs_diagram=q.needs_diagram, diagram_brief=q.diagram_brief,
-                                 pyq_reference=q.pyq_reference.strip() or f"{exam.short_name} {year}", source_url=q.source_url))
-        if getattr(q, "_solved", False):
-            out[-1]._solved = True
-    return [d for d in out if d.solution]
-
-
-MAX_KEY_DISAGREEMENT = 0.35
-
-
-SOLVED_NOTE = "answer worked out by two independent solves (the official key could not be matched to this copy of the paper)"
-
-
-def solve(exam: Exam, questions: list, language: str) -> list[int | None]:
-    """An independent answer per question (None when the solver finds the question unsound)."""
-    from .. import llm
-
-    answers: list[int | None] = [None] * len(questions)
-
-    def one(start: int) -> None:
-        chunk = questions[start:start + CHECK_BATCH]
-        listing = "\n\n".join(f"Q{i + 1}. {q.question}\n" + "\n".join(f"  ({j}) {o}" for j, o in enumerate(q.options))
-                               + (f"\n  [Figure: {q.diagram_brief}]" if q.needs_diagram and q.diagram_brief else "")
-                               for i, q in enumerate(chunk))
-        try:
-            res = llm.structured(
-                f"You are an expert examiner for {exam.name}. Solve each question yourself, carefully: work numericals out "
-                "fully and recall facts precisely. Give the 0-based index of the correct option; report a problem only if "
-                "no option or more than one option is defensibly correct.", f"Questions (language: {language}):\n\n{listing}",
-                Verdicts, max_tokens=16000, effort="medium")
-        except Exception:
-            log.exception("solve failed")
-            return
-        for v in res.verdicts:
-            if 1 <= v.number <= len(chunk) and not v.problem.strip() and 0 <= v.answer_index < len(chunk[v.number - 1].options):
-                answers[start + v.number - 1] = v.answer_index
-
-    with ThreadPoolExecutor(PARALLEL) as pool:
-        list(pool.map(one, range(0, len(questions), CHECK_BATCH)))
-    return answers
-
-
-def trusted(exam: Exam, questions: list, language: str, sample: int = 20, solve_unmatched: bool = False) -> list:
-    """Drop sources whose answers don't match an independent solve (wrong key, other shift, copying errors).
-
-    A few disagreements are normal (hard or disputed questions are flagged later); a third or more means the
-    answers don't belong to these questions. With solve_unmatched (scanned papers: candidates' booklets are
-    often numbered differently from the official key) the real questions are kept and answered by two independent
-    solves instead; only questions where both solves agree stay, marked as worked out."""
-    by_src: dict[str, list] = {}
-    for q in questions:
-        by_src.setdefault(q.source_url, []).append(q)
-    keep = []
-    for url, qs in by_src.items():
-        part = qs[:sample]
-        if len(part) < 5:
-            keep += qs
+        key = q.number if q.number else _norm(q.question + "|" + "|".join(opts))
+        if key in seen:
             continue
-        drafts = [QuestionDraft(topic=q.topic, question=q.question, options=q.options, correct_index=q.correct_index, hint="",
-                                solution="", explanation="", difficulty="medium", needs_diagram=q.needs_diagram,
-                                diagram_brief=q.diagram_brief, pyq_reference="", source_url=url) for q in part]
-        problems = check(exam, drafts, language)
-        wrong = sum(1 for p in problems if p.startswith("checker chose"))
-        if len(part) >= 5 and wrong / len(part) > MAX_KEY_DISAGREEMENT:  # tiny samples are noise
-            if not solve_unmatched:
-                log.warning("dropping %d question(s) from %s: %d of %d answers disagree with an independent solve",
-                            len(qs), url, wrong, len(part))
-                continue
-            a, b = solve(exam, qs, language), solve(exam, qs, language)
-            solved = []
-            for q, x, y in zip(qs, a, b):
-                if x is not None and x == y:
-                    q.correct_index = x
-                    q._solved = True  # answer worked out, not from a key
-                    solved.append(q)
-            log.warning("key doesn't match %s (%d of %d disagree): %d of %d questions answered by two agreeing solves",
-                        url, wrong, len(part), len(solved), len(qs))
-            keep += solved
-            continue
-        keep += qs
-    return keep
+        seen.add(key)
+        out.append(q)
+    return out
+
+
+def trusted(exam: Exam, questions: list, language: str, sample: int = 20) -> bool:
+    """Do these answers belong to these questions? An independent solve of a sample must mostly agree.
+
+    A few disagreements are normal (disputed questions are flagged later); a third or more means the answers came
+    from another booklet, shift or paper."""
+    part = questions[:sample]
+    if len(part) < 5:
+        return True
+    drafts = [QuestionDraft(topic=q.topic, question=q.question, options=q.options, correct_index=q.correct_index, hint="",
+                            solution="", explanation="", difficulty="medium", needs_diagram=q.needs_diagram,
+                            diagram_brief=q.diagram_brief, pyq_reference="", source_url=q.source_url) for q in part]
+    wrong = sum(1 for p in check(exam, drafts, language) if p.startswith("checker chose"))
+    if wrong / len(part) > MAX_KEY_DISAGREEMENT:
+        log.warning("answers of %s don't match its questions: %d of %d disagree with an independent solve",
+                    part[0].source_url, wrong, len(part))
+        return False
+    return True
 
 
 def explain(exam: Exam, questions, language: str) -> list[tuple[str, str, str]]:
@@ -495,19 +483,16 @@ def _scale(difficulty: dict[str, int], n: int) -> dict[str, int]:
 
 
 def build_pyq_section(exam: Exam, bp: Blueprint, section: Section, year: str, language: str, diagrams_on: bool,
-                      progress=None) -> list[Question]:
+                      progress=None, prefer_sitting: str = "") -> tuple[list[Question], str, str]:
+    """A complete section of a real past paper: (questions, sitting date, source). Raises PaperNotFound."""
     if progress:
         progress(f"{year} paper · {section.subject}: searching the web")
-    drafts = find_pyqs(exam, bp, section, year, language)
-    if not drafts:
-        return []
+    drafts, sitting, source = find_pyqs(exam, bp, section, year, language, prefer_sitting)
     problems = check(exam, drafts, language)
     svgs = draw_figures(drafts, language) if diagrams_on else [""] * len(drafts)
     out = []
     for d, prob, svg in zip(drafts, problems, svgs):
         if d.needs_diagram and not svg:
-            continue
-        if getattr(d, "_solved", False):
-            prob = SOLVED_NOTE + (f"; {prob}" if prob else "")
-        out.append(to_question(d, section.subject, svg, flagged=prob))  # official key kept; disagreement flagged
-    return out
+            raise PaperNotFound(f"{section.subject}: the figure of a question could not be drawn")  # never drop part of a paper
+        out.append(to_question(d, section.subject, svg, flagged=prob))  # official answer kept; a disagreement is flagged
+    return out, sitting, source

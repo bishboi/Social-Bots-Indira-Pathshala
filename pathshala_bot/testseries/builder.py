@@ -163,18 +163,24 @@ def build_test(cfg: control.ControlConfig, series: control.TestSeries, spec: Tes
     questions = []
     note = ""
     if spec.kind == "pyq":
+        # a real paper: every section complete, from one copy each, with the official answers - or no test at all
+        sittings, sources = [], []
         for sec in bp.sections:
-            qs = writer.build_pyq_section(exam, bp, sec, spec.year, lang, series.diagrams, progress)
-            if qs:
-                sections.append(TestSection(subject=sec.subject, marks_per_question=sec.marks_per_question,
-                                            negative_marks=sec.negative_marks, question_ids=[q.id for q in qs]))
-                questions += qs
-        found = len(questions)
-        if found == 0:
-            raise NoPaperFound(f"no questions of the {spec.year} paper could be found on the web")
-        if found < bp.total_questions:
-            note = f"{found} of {bp.total_questions} questions of the {spec.year} paper could be found and verified."
-        minutes = bp.duration_minutes if found >= bp.total_questions else bpmod.scaled_minutes(bp, found)
+            try:
+                qs, sitting, src = writer.build_pyq_section(exam, bp, sec, spec.year, lang, series.diagrams, progress,
+                                                            prefer_sitting=sittings[0] if sittings else "")
+            except writer.PaperNotFound as e:
+                raise NoPaperFound(f"{spec.year} paper not published: {e}") from e
+            sections.append(TestSection(subject=sec.subject, marks_per_question=sec.marks_per_question,
+                                        negative_marks=sec.negative_marks, question_ids=[q.id for q in qs]))
+            questions += qs
+            sittings.append(sitting)
+            sources.append(src)
+        dates = [f"{sec.subject}: {d}" for sec, d in zip(bp.sections, sittings) if d]
+        note = "Held on " + ", ".join(dates) + "." if dates else ""
+        if len(set(d for d in sittings if d)) > 1:
+            note += " The papers come from different sittings of this exam."
+        minutes = bp.duration_minutes
     else:
         secs = [bp.section(spec.subject)] if spec.kind == "subject" else bp.sections
         total = 0

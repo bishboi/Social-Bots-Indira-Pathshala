@@ -231,45 +231,6 @@ def test_phone_numbers():
     assert public.clean_phone("12345") is None and public.clean_phone("5829012345") is None
 
 
-def test_pyq_paper_keeps_official_key_and_flags_disagreement(ctl, monkeypatch):
-    from pathshala_bot.testseries import sources
-    from pathshala_bot.testseries.models import Help, HelpBatch, PaperQuestion, PaperQuestions
-
-    cfg, ts = _series_cfg(ctl)
-    bp = make_bp()
-    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(
-        notes="URLS:\nhttps://rpsc.example/2021.pdf - full paper", sources=[{"title": "RPSC", "url": "https://rpsc.example/2021.pdf"}]))
-    fetched = []
-    def fake_gather(urls, limit=6, keyword=""):
-        fetched.append(urls)
-        f = sources.Found()
-        f.papers = [("https://rpsc.example/2021.pdf", "1. Q ... Ans (b) " * 100)]
-        return f
-
-    monkeypatch.setattr(sources, "gather", fake_gather)
-
-    def fake_structured(system, user, model, **kw):
-        if model is PaperQuestions:
-            sec = "Hindi" if '"Hindi"' in system else "Reasoning"
-            d = _draft("Sandhi" if sec == "Hindi" else "Series", 1 if sec == "Hindi" else 2)
-            return PaperQuestions(questions=[PaperQuestion(number=1, topic=d.topic, question=d.question, options=d.options, correct_index=1,
-                                                           needs_diagram=False, diagram_brief="", pyq_reference="",
-                                                           source_url="https://rpsc.example/2021.pdf")])
-        if model is HelpBatch:
-            assert "official key" in user
-            return HelpBatch(items=[Help(number=1, hint="h", solution="s", explanation="e")])
-        return Verdicts(verdicts=[Verdict(number=1, answer_index=3, problem="", hint_reveals=False)])
-
-    monkeypatch.setattr(llm, "structured", fake_structured)
-    spec = builder.plan(ts, bp)[0]
-    test = builder.build_test(cfg, ts, spec, bp)
-    assert "https://rpsc.example/2021.pdf" in fetched[0]  # the paper itself is read, not just search snippets
-    q = test.questions[0]
-    assert len(test.questions) == 2 and q.correct_index == 1 and (q.hint, q.solution, q.explanation) == ("h", "s", "e")  # official key kept
-    assert "checker chose option 4" in q.flagged and q.pyq_reference == "Rajasthan SI 2021"
-    assert "2 of 16" in test.note and test.duration_minutes == bpm.scaled_minutes(bp, 2)
-
-
 def test_only_public_urls_are_fetched():
     from pathshala_bot.testseries import sources
 
@@ -337,62 +298,6 @@ def test_revealing_hint_is_rewritten_not_rejected(monkeypatch):
     assert drafts[0].hint == "think about Sandhi" and drafts[1].hint == "recall the rule for vowel sandhi"
 
 
-def test_scanned_paper_is_read_with_the_official_key(monkeypatch):
-    from pathshala_bot.config import load_exams
-    from pathshala_bot.testseries import sources
-    from pathshala_bot.testseries.models import Help, HelpBatch, PaperQuestion, PaperQuestions
-
-    bp = make_bp()
-    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="URLS:\nhttps://x.example/hindi-2021.pdf", sources=[]))
-
-    def fake_gather(urls, limit=6, keyword=""):
-        f = sources.Found()
-        f.scanned = [("https://x.example/hindi-2021.pdf", b"%PDF scanned")]
-        f.keys = [("https://x.example/key.pdf", "Model Answer Key  Q. No. RES\n 1  4\n 2  2")]
-        return f
-
-    monkeypatch.setattr(sources, "gather", fake_gather)
-    monkeypatch.setattr(sources, "page_images", lambda pdf, **k: [b"png1", b"png2", b"png3", b"png4"])
-    seen = []
-
-    def fake(system, user, model, images=None, **kw):
-        if model is PaperQuestions:
-            seen.append((len(images), "Model Answer Key" in user, "pen marks" in system))
-            n = len(seen)
-            return PaperQuestions(questions=[PaperQuestion(number=n, topic="Sandhi", question=_stem("Sandhi", n), options=["a", "b", "c", "d"],
-                                                           correct_index=3, needs_diagram=False, diagram_brief="", pyq_reference="",
-                                                           source_url="https://x.example/hindi-2021.pdf")])
-        if model is Verdicts:  # the independent solve agrees with the key
-            return Verdicts(verdicts=[Verdict(number=1, answer_index=3, problem="", hint_reveals=False)])
-        return HelpBatch(items=[Help(number=i + 1, hint="h", solution="s", explanation="e") for i in range(2)])
-
-    monkeypatch.setattr(llm, "structured", fake)
-    qs = writer.find_pyqs(load_exams()["rajasthan-si"], bp, bp.sections[0], "2021", "hi")
-    assert sorted(seen) == [(1, True, True), (3, True, True)]  # pages in groups of 3, with the key, ignoring pen marks
-    assert len(qs) == 2 and all(q.correct_index == 3 for q in qs)
-
-
-def test_source_with_a_mismatched_key_is_dropped(monkeypatch):
-    from pathshala_bot.config import load_exams
-    from pathshala_bot.testseries.models import PaperQuestion
-
-    def pq(n, src):
-        return PaperQuestion(number=n, topic="Sandhi", question=_stem(src, n), options=["a", "b", "c", "d"], correct_index=0,
-                             needs_diagram=False, diagram_brief="", pyq_reference="", source_url=src)
-
-    qs = [pq(i, "good") for i in range(10)] + [pq(i, "bad") for i in range(10)]
-
-    def fake(system, user, model, **kw):
-        bad = "bad" in user
-        n = user.count("\nQ") + 1
-        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=(2 if bad and i % 2 == 0 else 0), problem="", hint_reveals=False)
-                                  for i in range(n)])
-
-    monkeypatch.setattr(llm, "structured", fake)
-    kept = writer.trusted(load_exams()["rajasthan-si"], qs, "hi")
-    assert {q.source_url for q in kept} == {"good"} and len(kept) == 10
-
-
 def test_short_tests_are_topped_up(ctl, monkeypatch):
     cfg, ts = _series_cfg(ctl, access="free")
     ts.stages[0].enabled = False
@@ -412,25 +317,71 @@ def test_short_tests_are_topped_up(ctl, monkeypatch):
     assert not builder.short_tests(ts, make_bp())
 
 
-def test_scanned_copy_with_other_numbering_is_answered_by_two_agreeing_solves(monkeypatch):
-    from pathshala_bot.config import load_exams
+def _paper(src, n, sitting="13-09-2021", answer=1, topic="Sandhi", start=1):
     from pathshala_bot.testseries.models import PaperQuestion
 
-    qs = [PaperQuestion(number=i, topic="Sandhi", question=_stem("scan", i), options=["a", "b", "c", "d"], correct_index=0,
-                        needs_diagram=False, diagram_brief="", pyq_reference="", source_url="scan") for i in range(10)]
-    calls = {"n": 0}
+    return [PaperQuestion(number=start + i, topic=topic, question=_stem(src, i) if i % 3 else "किस विकल्प में शुद्ध वाक्य है?",
+                          options=[f"{src} {i} a", f"{src} {i} b", f"{src} {i} c", f"{src} {i} d"], correct_index=answer,
+                          needs_diagram=False, diagram_brief="", pyq_reference="", sitting=sitting, source_url=src) for i in range(n)]
+
+
+def _pyq_world(monkeypatch, papers: dict, solve_answer=1):
+    """papers: section subject -> {source url: [PaperQuestion]} returned by extraction of that source."""
+    from pathshala_bot.testseries import sources
+    from pathshala_bot.testseries.models import Help, HelpBatch, PaperQuestions
+
+    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="URLS:\nhttps://a.example/x", sources=[]))
+    current = {}
+
+    def fake_gather(urls, limit=6, keyword=""):
+        sec = "Hindi" if "Hindi" in keyword else "Reasoning"
+        current["sec"] = sec
+        f = sources.Found()
+        f.papers = [(u, f"paper text of {u} " * 50) for u in papers.get(sec, {})]
+        return f
+
+    monkeypatch.setattr(sources, "gather", fake_gather)
 
     def fake(system, user, model, **kw):
-        calls["n"] += 1
+        if model is PaperQuestions:
+            url = user.split("(", 1)[1].split(")", 1)[0]
+            return PaperQuestions(questions=papers[current["sec"]].get(url, []))
+        if model is HelpBatch:
+            n = user.count("\nQ") + 1
+            return HelpBatch(items=[Help(number=i + 1, hint="h", solution="s", explanation="e") for i in range(n)])
         n = user.count("\nQ") + 1
-        second = calls["n"] == 3  # 1: key check, 2 and 3: the two solves
-        # solves: answer 2 everywhere, except the second solve disagrees on question 1
-        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=(1 if second and i == 0 else 2), problem="", hint_reveals=False)
-                                  for i in range(n)])
+        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=solve_answer, problem="", hint_reveals=False) for i in range(n)])
 
     monkeypatch.setattr(llm, "structured", fake)
-    exam = load_exams()["rajasthan-si"]
-    assert writer.trusted(exam, list(qs), "hi") == []  # text sources: a mismatched key is dropped
-    calls["n"] = 0
-    kept = writer.trusted(exam, list(qs), "hi", solve_unmatched=True)
-    assert len(kept) == 9 and all(q.correct_index == 2 and q._solved for q in kept)
+
+
+def test_past_paper_is_complete_one_sitting_with_official_answers(ctl, monkeypatch):
+    cfg, ts = _series_cfg(ctl)
+    bp = make_bp()
+    _pyq_world(monkeypatch, {
+        # Hindi: a complete copy of the 13-09 sitting, and a fuller-looking mix that isn't complete on its own
+        "Hindi": {"https://a.example/hindi-13": _paper("h13", 10), "https://a.example/hindi-part": _paper("hp", 6)},
+        # Reasoning: complete copies of two sittings; the one matching Paper I's date wins
+        "Reasoning": {"https://a.example/r-14": _paper("r14", 6, "14-09-2021", topic="Series"),
+                      "https://a.example/r-13": _paper("r13", 6, "13/9/2021", topic="Series")},
+    })
+    test = builder.build_test(cfg, ts, builder.plan(ts, bp)[0], bp)
+    assert [len(s.question_ids) for s in test.sections] == [10, 6] and test.duration_minutes == bp.duration_minutes
+    assert {q.source_url for q in test.questions if q.subject == "Hindi"} == {"https://a.example/hindi-13"}
+    assert {q.source_url for q in test.questions if q.subject == "Reasoning"} == {"https://a.example/r-13"}  # same sitting
+    assert test.questions[0].pyq_reference == "Rajasthan SI 2021 (13-09-2021)" and "13-09-2021" in test.note
+    # repeated stems with different options are different questions of the paper, not duplicates
+    assert sum(1 for q in test.questions if q.question == "किस विकल्प में शुद्ध वाक्य है?") == 4 + 2
+
+
+def test_incomplete_or_mismatched_paper_is_not_published(ctl, monkeypatch):
+    cfg, ts = _series_cfg(ctl)
+    bp = make_bp()
+    spec = builder.plan(ts, bp)[0]
+    _pyq_world(monkeypatch, {"Hindi": {"https://a.example/a": _paper("a", 7), "https://a.example/b": _paper("b", 5)}})
+    with pytest.raises(builder.NoPaperFound, match="7 of 10"):  # never pieced together from two copies
+        builder.build_test(cfg, ts, spec, bp)
+    _pyq_world(monkeypatch, {"Hindi": {"https://a.example/a": _paper("a", 10, answer=0)}}, solve_answer=2)
+    with pytest.raises(builder.NoPaperFound, match="don't belong"):  # key of another booklet / shift
+        builder.build_test(cfg, ts, spec, bp)
+    assert builder.load_test("si", spec.id) is None

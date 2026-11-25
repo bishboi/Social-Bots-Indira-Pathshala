@@ -92,6 +92,7 @@ class PaperQuestion(BaseModel):
     needs_diagram: bool = Field(description="True only if the original question has a figure.")
     diagram_brief: str = Field(description="If needs_diagram: the figure exactly as in the paper, precisely described. Else empty.")
     pyq_reference: str = Field(description="'<exam> <year>' plus shift/date if known.")
+    sitting: str = Field(description="Date (and shift) of the paper as printed in the document, as DD-MM-YYYY (+ ' Shift N'); empty if not given.")
     source_url: str = Field(description="URL of the document the question was copied from.")
 
 
