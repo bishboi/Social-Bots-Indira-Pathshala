@@ -221,7 +221,7 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
             with ThreadPoolExecutor(PARALLEL) as pool:
                 got = [q for qs in pool.map(ocr, jobs) for q in qs]
             log.info("OCR of %s: %d page(s) -> %d question(s)", url, len(pages), len(got))
-            got = trusted(exam, got, language)  # a key from another shift/paper shows up as disagreement
+            got = trusted(exam, got, language, solve_unmatched=True)  # a key from another booklet/shift shows up as disagreement
             found_qs += got
             if len(got) >= 0.6 * section.questions:
                 break
@@ -248,17 +248,53 @@ it contains. Note the exam date/shift. If the paper of {year} was never held or 
                                  correct_index=q.correct_index, hint=h[0], solution=h[1], explanation=h[2],
                                  difficulty="medium", needs_diagram=q.needs_diagram, diagram_brief=q.diagram_brief,
                                  pyq_reference=q.pyq_reference.strip() or f"{exam.short_name} {year}", source_url=q.source_url))
+        if getattr(q, "_solved", False):
+            out[-1]._solved = True
     return [d for d in out if d.solution]
 
 
 MAX_KEY_DISAGREEMENT = 0.35
 
 
-def trusted(exam: Exam, questions: list, language: str, sample: int = 20) -> list:
+SOLVED_NOTE = "answer worked out by two independent solves (the official key could not be matched to this copy of the paper)"
+
+
+def solve(exam: Exam, questions: list, language: str) -> list[int | None]:
+    """An independent answer per question (None when the solver finds the question unsound)."""
+    from .. import llm
+
+    answers: list[int | None] = [None] * len(questions)
+
+    def one(start: int) -> None:
+        chunk = questions[start:start + CHECK_BATCH]
+        listing = "\n\n".join(f"Q{i + 1}. {q.question}\n" + "\n".join(f"  ({j}) {o}" for j, o in enumerate(q.options))
+                               + (f"\n  [Figure: {q.diagram_brief}]" if q.needs_diagram and q.diagram_brief else "")
+                               for i, q in enumerate(chunk))
+        try:
+            res = llm.structured(
+                f"You are an expert examiner for {exam.name}. Solve each question yourself, carefully: work numericals out "
+                "fully and recall facts precisely. Give the 0-based index of the correct option; report a problem only if "
+                "no option or more than one option is defensibly correct.", f"Questions (language: {language}):\n\n{listing}",
+                Verdicts, max_tokens=16000, effort="medium")
+        except Exception:
+            log.exception("solve failed")
+            return
+        for v in res.verdicts:
+            if 1 <= v.number <= len(chunk) and not v.problem.strip() and 0 <= v.answer_index < len(chunk[v.number - 1].options):
+                answers[start + v.number - 1] = v.answer_index
+
+    with ThreadPoolExecutor(PARALLEL) as pool:
+        list(pool.map(one, range(0, len(questions), CHECK_BATCH)))
+    return answers
+
+
+def trusted(exam: Exam, questions: list, language: str, sample: int = 20, solve_unmatched: bool = False) -> list:
     """Drop sources whose answers don't match an independent solve (wrong key, other shift, copying errors).
 
     A few disagreements are normal (hard or disputed questions are flagged later); a third or more means the
-    answers don't belong to these questions."""
+    answers don't belong to these questions. With solve_unmatched (scanned papers: candidates' booklets are
+    often numbered differently from the official key) the real questions are kept and answered by two independent
+    solves instead; only questions where both solves agree stay, marked as worked out."""
     by_src: dict[str, list] = {}
     for q in questions:
         by_src.setdefault(q.source_url, []).append(q)
@@ -274,8 +310,20 @@ def trusted(exam: Exam, questions: list, language: str, sample: int = 20) -> lis
         problems = check(exam, drafts, language)
         wrong = sum(1 for p in problems if p.startswith("checker chose"))
         if len(part) >= 5 and wrong / len(part) > MAX_KEY_DISAGREEMENT:  # tiny samples are noise
-            log.warning("dropping %d question(s) from %s: %d of %d answers disagree with an independent solve",
-                        len(qs), url, wrong, len(part))
+            if not solve_unmatched:
+                log.warning("dropping %d question(s) from %s: %d of %d answers disagree with an independent solve",
+                            len(qs), url, wrong, len(part))
+                continue
+            a, b = solve(exam, qs, language), solve(exam, qs, language)
+            solved = []
+            for q, x, y in zip(qs, a, b):
+                if x is not None and x == y:
+                    q.correct_index = x
+                    q._solved = True  # answer worked out, not from a key
+                    solved.append(q)
+            log.warning("key doesn't match %s (%d of %d disagree): %d of %d questions answered by two agreeing solves",
+                        url, wrong, len(part), len(solved), len(qs))
+            keep += solved
             continue
         keep += qs
     return keep
@@ -459,5 +507,7 @@ def build_pyq_section(exam: Exam, bp: Blueprint, section: Section, year: str, la
     for d, prob, svg in zip(drafts, problems, svgs):
         if d.needs_diagram and not svg:
             continue
+        if getattr(d, "_solved", False):
+            prob = SOLVED_NOTE + (f"; {prob}" if prob else "")
         out.append(to_question(d, section.subject, svg, flagged=prob))  # official key kept; disagreement flagged
     return out

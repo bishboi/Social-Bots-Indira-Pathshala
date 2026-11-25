@@ -410,3 +410,27 @@ def test_short_tests_are_topped_up(ctl, monkeypatch):
     t = builder.load_test("si", "subject-hindi-1")
     assert len(t.questions) == 25 and len(t.sections[0].question_ids) == 25 and not t.note
     assert not builder.short_tests(ts, make_bp())
+
+
+def test_scanned_copy_with_other_numbering_is_answered_by_two_agreeing_solves(monkeypatch):
+    from pathshala_bot.config import load_exams
+    from pathshala_bot.testseries.models import PaperQuestion
+
+    qs = [PaperQuestion(number=i, topic="Sandhi", question=_stem("scan", i), options=["a", "b", "c", "d"], correct_index=0,
+                        needs_diagram=False, diagram_brief="", pyq_reference="", source_url="scan") for i in range(10)]
+    calls = {"n": 0}
+
+    def fake(system, user, model, **kw):
+        calls["n"] += 1
+        n = user.count("\nQ") + 1
+        second = calls["n"] == 3  # 1: key check, 2 and 3: the two solves
+        # solves: answer 2 everywhere, except the second solve disagrees on question 1
+        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=(1 if second and i == 0 else 2), problem="", hint_reveals=False)
+                                  for i in range(n)])
+
+    monkeypatch.setattr(llm, "structured", fake)
+    exam = load_exams()["rajasthan-si"]
+    assert writer.trusted(exam, list(qs), "hi") == []  # text sources: a mismatched key is dropped
+    calls["n"] = 0
+    kept = writer.trusted(exam, list(qs), "hi", solve_unmatched=True)
+    assert len(kept) == 9 and all(q.correct_index == 2 and q._solved for q in kept)
