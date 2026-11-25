@@ -278,3 +278,15 @@ def test_series_settings_validation(ctl):
     view = ctl.public_view(ctl.load())
     assert view["secrets"]["openrouter_api_key"].startswith("•") and "sk-or-secret" not in json.dumps(view)
     assert ctl.merge_from_ui(ctl.load(), view).secrets.openrouter_api_key == "sk-or-secret"
+
+
+def test_missing_paper_is_skipped_not_blocking(ctl, monkeypatch):
+    cfg, ts = _series_cfg(ctl, access="free")
+    builder.save_blueprint(ts, make_bp())
+    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="NO PAPER FOUND", sources=[]))
+    _fake_agents(monkeypatch)
+    out = builder.run(cfg, ts, what="next", dry_run=True)
+    lines = out.splitlines()  # both missing papers are skipped, then the next test is built
+    assert [ln[0] for ln in lines] == ["⏭", "⏭", "✅"] and set(builder.skipped("si")) == {"pyq-2021", "pyq-2018"}
+    assert builder.next_spec(ts, make_bp()).id == "subject-reasoning-1"
+    assert builder.delete_test("si", "pyq-2021") and "pyq-2021" not in builder.skipped("si")  # retry

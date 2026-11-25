@@ -221,6 +221,7 @@ def create_app(with_bot: bool = True) -> FastAPI:
         for ts in cfg.test_series:
             bp = tsb.load_blueprint(ts)
             have = tsb.built(ts.id)
+            skip = tsb.skipped(ts.id)
             try:
                 hist = hist or get_history()
                 stats = hist.series_stats(ts.id)
@@ -235,7 +236,7 @@ def create_app(with_bot: bool = True) -> FastAPI:
                 rows.append({"id": spec.id, "kind": spec.kind, "title": spec.title, "planned": spec.id in planned,
                              "questions": len(t.questions) if t else spec.questions, "built": bool(t),
                              "minutes": t.duration_minutes if t else None, "access": t.access if t else spec.access,
-                             "note": t.note if t else "", "flagged": sum(1 for q in t.questions if q.flagged) if t else 0,
+                             "note": t.note if t else skip.get(spec.id, ""), "skipped": spec.id in skip, "flagged": sum(1 for q in t.questions if q.flagged) if t else 0,
                              "figures": sum(1 for q in t.questions if q.svg) if t else 0,
                              "published": (t.published or {}).get("at") if t else None,
                              "files": [n for n in ("paper.pdf", "solutions.pdf") if t and (tsb.test_dir(ts.id, t.id) / n).exists()],

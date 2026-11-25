@@ -316,9 +316,9 @@
                 <div class="muted" x-show="t.flagged" x-text="t.flagged + ' previous-year answer(s) differ from the checker - review the solutions PDF'"></div></td>
               <td><span x-text="t.questions"></span><span class="muted" x-show="t.minutes" x-text="' · ' + t.minutes + ' min'"></span><span class="muted" x-show="t.figures" x-text="' · ' + t.figures + ' figures'"></span></td>
               <td class="hide-sm" x-text="t.access"></td>
-              <td><span class="pill" :class="t.built ? (t.published ? 'ok' : '') : 'warn'" x-text="t.built ? (t.published ? 'posted' : 'built') : 'planned'"></span></td>
+              <td><span class="pill" :class="t.built ? (t.published ? 'ok' : '') : 'warn'" x-text="t.built ? (t.published ? 'posted' : 'built') : (t.skipped ? 'not found' : 'planned')"></span></td>
               <td x-text="t.attempts ? t.attempts + ' · avg ' + t.avg + '%' : '—'"></td>
-              <td><div class="row" x-show="t.built">
+              <td><a href="#" x-show="t.skipped" @click.prevent="deleteTest(ts, t)">retry</a><div class="row" x-show="t.built">
                 <template x-for="f in t.files"><a :href="'/series-files/' + ts.id + '/' + t.id + '/' + f" target="_blank" x-text="f.replace('.pdf','')"></a></template>
                 <a x-show="t.url && t.access!=='private'" :href="t.url" target="_blank">online</a>
                 <a href="#" @click.prevent="publishTest(ts, t)" x-show="t.access!=='private'">post</a>

@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 BATCH = 10  # questions per writer call (each carries a hint and a detailed explanation)
 CHECK_BATCH = 20  # questions per checker call
 REFILL_ROUNDS = 2
-PARALLEL = 3
+PARALLEL = 4
 
 
 def _norm(text: str) -> str:

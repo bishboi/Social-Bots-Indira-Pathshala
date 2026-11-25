@@ -29,6 +29,10 @@ from .models import KINDS, Blueprint, Test, TestSection, TestSpec
 log = logging.getLogger(__name__)
 
 
+class NoPaperFound(RuntimeError):
+    pass
+
+
 def slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:30].strip("-")
     return s or "s"
@@ -138,7 +142,7 @@ def save_test(test: Test) -> Path:
 
 def delete_test(series_id: str, test_id: str) -> bool:
     d = test_dir(series_id, test_id)
-    if load_test(series_id, test_id) is None:
+    if load_test(series_id, test_id) is None and not (d / "skipped.json").exists():
         return False
     shutil.rmtree(d)
     return True
@@ -167,7 +171,7 @@ def build_test(cfg: control.ControlConfig, series: control.TestSeries, spec: Tes
                 questions += qs
         found = len(questions)
         if found == 0:
-            raise RuntimeError(f"No questions of the {spec.year} paper could be found on the web")
+            raise NoPaperFound(f"no questions of the {spec.year} paper could be found on the web")
         if found < bp.total_questions:
             note = f"{found} of {bp.total_questions} questions of the {spec.year} paper could be found and verified."
         minutes = bp.duration_minutes if found >= bp.total_questions else bpmod.scaled_minutes(bp, found)
@@ -206,9 +210,28 @@ def build_test(cfg: control.ControlConfig, series: control.TestSeries, spec: Tes
     return test
 
 
+def skipped(series_id: str) -> dict[str, str]:
+    """Tests the agent could not build (e.g. a year's paper isn't on the web): test id -> reason."""
+    base = series_dir(series_id)
+    out = {}
+    for p in sorted(base.glob("*/skipped.json")) if base.exists() else []:
+        try:
+            out[p.parent.name] = json.loads(p.read_text(encoding="utf-8")).get("reason", "")
+        except (ValueError, OSError):
+            pass
+    return out
+
+
+def mark_skipped(series_id: str, test_id: str, reason: str) -> None:
+    d = test_dir(series_id, test_id)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "skipped.json").write_text(json.dumps({"reason": reason, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                                               ensure_ascii=False), encoding="utf-8")
+
+
 def next_spec(series: control.TestSeries, bp: Blueprint) -> TestSpec | None:
-    have = built(series.id)
-    return next((s for s in plan(series, bp) if s.id not in have), None)
+    have, skip = built(series.id), skipped(series.id)
+    return next((s for s in plan(series, bp) if s.id not in have and s.id not in skip), None)
 
 
 def run(cfg: control.ControlConfig, series: control.TestSeries, what: str = "next", dry_run: bool = False,
@@ -229,6 +252,10 @@ def run(cfg: control.ControlConfig, series: control.TestSeries, what: str = "nex
             progress(f"building {spec.title}")
         try:
             test = build_test(cfg, series, spec, bp, progress)
+        except NoPaperFound as e:  # move on to the rest of the funnel; "delete" in the panel retries it
+            mark_skipped(series.id, spec.id, str(e))
+            lines.append(f"⏭ {spec.title}: {e}")
+            continue
         except Exception as e:  # noqa: BLE001
             from ..providers import friendly_error
 
