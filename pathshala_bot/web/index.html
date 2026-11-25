@@ -314,7 +314,8 @@
             <template x-for="t in seriesInfo(ts).tests"><tr>
               <td><span x-text="stageIcon(t.kind) + ' ' + t.title"></span><div class="muted" x-show="t.note" x-text="t.note"></div>
                 <div class="muted" x-show="t.flagged" x-text="t.flagged + ' previous-year answer(s) differ from the checker - review the solutions PDF'"></div></td>
-              <td><span x-text="t.questions"></span><span class="muted" x-show="t.minutes" x-text="' · ' + t.minutes + ' min'"></span><span class="muted" x-show="t.figures" x-text="' · ' + t.figures + ' figures'"></span></td>
+              <td><span x-text="t.questions"></span><span class="muted" x-show="t.minutes" x-text="' · ' + t.minutes + ' min'"></span><span class="muted" x-show="t.figures" x-text="' · ' + t.figures + ' figures'"></span>
+                <div x-show="t.kind==='pyq' && t.built"><span class="pill" :class="t.practice ? 'warn' : 'ok'" x-text="t.practice ? (t.questions - t.practice) + ' real · ' + t.practice + ' practice' : 'all real'"></span></div></td>
               <td class="hide-sm" x-text="t.access"></td>
               <td><span class="pill" :class="t.built ? (t.published ? 'ok' : '') : 'warn'" x-text="t.built ? (t.published ? 'posted' : 'built') : (t.skipped ? 'not found' : 'planned')"></span></td>
               <td x-text="t.attempts ? t.attempts + ' · avg ' + t.avg + '%' : '—'"></td>

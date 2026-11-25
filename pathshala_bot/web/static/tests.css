@@ -60,5 +60,6 @@ label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
 .explain { border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin-top:8px; font-size:14px; }
 .explain summary { cursor:pointer; font-weight:600; }
 .explain div { white-space:pre-line; margin-top:6px; }
+.qhead .practice { color:var(--warn); font-weight:700; }
 .big { font-size:34px; font-weight:800; line-height:1.1; }
 .status-correct { color:var(--ok); } .status-wrong { color:var(--bad); } .status-skipped { color:var(--muted); }

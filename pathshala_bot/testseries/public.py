@@ -159,13 +159,21 @@ def score(test: Test, answers: dict) -> dict:
             "accuracy": round(100 * right / attempted, 1) if attempted else 0.0, "sections": sections, "review": review}
 
 
+def ref_label(test: Test, q) -> str:
+    """What students see next to a question: the paper it is from, or that it is a practice question."""
+    if q.practice:
+        return (f"अभ्यास प्रश्न - {test.year} के मूल पेपर से नहीं" if test.language == "hi"
+                else f"Practice question - not from the actual {test.year} paper")
+    return q.pyq_reference
+
+
 def public_questions(test: Test) -> list[dict]:
     out, n = [], 0
     for sec, q in test.ordered():
         n += 1
         out.append({"n": n, "id": q.id, "section": sec.subject, "question": q.question, "options": q.options,
                     "svg": ("data:image/svg+xml;base64," + __import__("base64").b64encode(q.svg.encode()).decode()) if q.svg else "",
-                    "ref": q.pyq_reference, "hint": q.hint})
+                    "ref": ref_label(test, q), "practice": q.practice, "hint": q.hint})
     return out
 
 

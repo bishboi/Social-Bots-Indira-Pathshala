@@ -54,7 +54,7 @@
       <div>
         <div class="tabs"><template x-for="s in m.sections"><button :class="q().section===s.subject && 'on'" @click="goSection(s.subject)" x-text="s.subject"></button></template></div>
         <div class="card">
-          <div class="qhead"><span x-text="L.q + ' ' + q().n + ' / ' + qs.length"></span><span x-text="q().section"></span><span x-show="q().ref" x-text="q().ref"></span></div>
+          <div class="qhead"><span x-text="L.q + ' ' + q().n + ' / ' + qs.length"></span><span x-text="q().section"></span><span x-show="q().ref" :class="q().practice && 'practice'" x-text="q().ref"></span></div>
           <div class="stem" x-text="q().question"></div>
           <div class="fig" x-show="q().svg"><img :src="q().svg" alt="figure"></div>
           <div x-show="q().hint" style="margin-bottom:10px">

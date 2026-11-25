@@ -267,18 +267,6 @@ def test_series_settings_validation(ctl):
     assert ctl.merge_from_ui(ctl.load(), view).secrets.openrouter_api_key == "sk-or-secret"
 
 
-def test_missing_paper_is_skipped_not_blocking(ctl, monkeypatch):
-    cfg, ts = _series_cfg(ctl, access="free")
-    builder.save_blueprint(ts, make_bp())
-    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="NO PAPER FOUND", sources=[]))
-    _fake_agents(monkeypatch)
-    out = builder.run(cfg, ts, what="next", dry_run=True)
-    lines = out.splitlines()  # both missing papers are skipped, then the next test is built
-    assert [ln[0] for ln in lines] == ["⏭", "⏭", "✅"] and set(builder.skipped("si")) == {"pyq-2021", "pyq-2018"}
-    assert builder.next_spec(ts, make_bp()).id == "subject-reasoning-1"
-    assert builder.delete_test("si", "pyq-2021") and "pyq-2021" not in builder.skipped("si")  # retry
-
-
 def test_revealing_hint_is_rewritten_not_rejected(monkeypatch):
     from pathshala_bot.config import load_exams
     from pathshala_bot.testseries.models import HintBatch, NewHint
@@ -333,7 +321,7 @@ def _pyq_world(monkeypatch, papers: dict, solve_answer=1):
     monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="URLS:\nhttps://a.example/x", sources=[]))
     current = {}
 
-    def fake_gather(urls, limit=6, keyword=""):
+    def fake_gather(urls, limit=6, keyword="", **kw):
         sec = "Hindi" if "Hindi" in keyword else "Reasoning"
         current["sec"] = sec
         f = sources.Found()
@@ -374,14 +362,51 @@ def test_past_paper_is_complete_one_sitting_with_official_answers(ctl, monkeypat
     assert sum(1 for q in test.questions if q.question == "किस विकल्प में शुद्ध वाक्य है?") == 4 + 2
 
 
-def test_incomplete_or_mismatched_paper_is_not_published(ctl, monkeypatch):
+def test_incomplete_paper_is_filled_with_labelled_practice_questions(ctl, monkeypatch):
     cfg, ts = _series_cfg(ctl)
     bp = make_bp()
     spec = builder.plan(ts, bp)[0]
-    _pyq_world(monkeypatch, {"Hindi": {"https://a.example/a": _paper("a", 7), "https://a.example/b": _paper("b", 5)}})
-    with pytest.raises(builder.NoPaperFound, match="7 of 10"):  # never pieced together from two copies
-        builder.build_test(cfg, ts, spec, bp)
-    _pyq_world(monkeypatch, {"Hindi": {"https://a.example/a": _paper("a", 10, answer=0)}}, solve_answer=2)
-    with pytest.raises(builder.NoPaperFound, match="don't belong"):  # key of another booklet / shift
-        builder.build_test(cfg, ts, spec, bp)
-    assert builder.load_test("si", spec.id) is None
+    _pyq_world(monkeypatch, {"Hindi": {"https://a.example/a": _paper("a", 7), "https://a.example/b": _paper("b", 5)},
+                             "Reasoning": {"https://a.example/r": _paper("r", 6, topic="Series")}})
+    real_fake = llm.structured
+
+    def fake(system, user, model, **kw):  # writer batches for the gap
+        if model is QuestionBatch:
+            lines = [ln for ln in user.splitlines() if ln.startswith("- ") and "question(s)" in ln]
+            return QuestionBatch(questions=[_draft(ln[2:].split(": ")[0], 500 + k) for ln in lines for k in range(int(ln.split(": ")[1].split()[0]))])
+        return real_fake(system, user, model, **kw)
+
+    monkeypatch.setattr(llm, "structured", fake)
+    test = builder.build_test(cfg, ts, spec, bp)
+    hindi = [q for q in test.questions if q.subject == "Hindi"]
+    assert len(hindi) == 10 and sum(q.practice for q in hindi) == 3  # 7 real from ONE copy (never mixed with b) + 3 practice
+    assert {q.source_url for q in hindi if not q.practice} == {"https://a.example/a"}
+    assert all(not q.pyq_reference for q in hindi if q.practice)
+    assert "13 of 16 questions are from the actual 2021 paper" in test.note and "Hindi: 7 of 10" in test.note
+    assert "Practice questions are marked" in test.note and test.title == spec.title
+    from pathshala_bot.testseries import public
+
+    labels = [q["ref"] for q in public.public_questions(test) if q["practice"]]
+    assert len(labels) == 3 and all("2021" in lab and "अभ्यास" in lab for lab in labels)
+
+
+def test_paper_not_found_is_practice_and_says_so(ctl, monkeypatch):
+    cfg, ts = _series_cfg(ctl)
+    bp = make_bp()
+    spec = builder.plan(ts, bp)[0]
+    _pyq_world(monkeypatch, {"Hindi": {"https://a.example/a": _paper("a", 10, answer=0)}}, solve_answer=2)  # key doesn't match
+    real_fake = llm.structured
+
+    def fake(system, user, model, **kw):
+        if model is QuestionBatch:
+            lines = [ln for ln in user.splitlines() if ln.startswith("- ") and "question(s)" in ln]
+            return QuestionBatch(questions=[_draft(ln[2:].split(": ")[0], 900 + k + len(user)) for ln in lines for k in range(int(ln.split(": ")[1].split()[0]))])
+        if model is Verdicts and "Hint shown" in user:  # the checker accepts the practice questions
+            n = user.count("\nQ") + 1
+            return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=1, problem="", hint_reveals=False) for i in range(n)])
+        return real_fake(system, user, model, **kw)
+
+    monkeypatch.setattr(llm, "structured", fake)
+    test = builder.build_test(cfg, ts, spec, bp)
+    assert len(test.questions) == 16 and all(q.practice for q in test.questions)
+    assert test.title.endswith("· pattern practice") and "could not be found" in test.note and "none are from the actual paper" in test.note

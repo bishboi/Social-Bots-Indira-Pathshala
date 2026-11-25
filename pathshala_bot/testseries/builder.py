@@ -163,23 +163,34 @@ def build_test(cfg: control.ControlConfig, series: control.TestSeries, spec: Tes
     questions = []
     note = ""
     if spec.kind == "pyq":
-        # a real paper: every section complete, from one copy each, with the official answers - or no test at all
-        sittings, sources = [], []
+        # real questions from one copy per paper with official answers; any gap is filled with practice questions
+        # in the paper's pattern, each marked as such, and the note says exactly how many are real
+        sittings, notes, real_total = [], [], 0
         for sec in bp.sections:
-            try:
-                qs, sitting, src = writer.build_pyq_section(exam, bp, sec, spec.year, lang, series.diagrams, progress,
-                                                            prefer_sitting=sittings[0] if sittings else "")
-            except writer.PaperNotFound as e:
-                raise NoPaperFound(f"{spec.year} paper not published: {e}") from e
+            qs, sitting, why, real = writer.build_pyq_section(exam, bp, sec, spec.year, lang, series.diagrams, progress,
+                                                              prefer_sitting=next((d for d in sittings if d), ""),
+                                                              focus=series.focus)
             sections.append(TestSection(subject=sec.subject, marks_per_question=sec.marks_per_question,
                                         negative_marks=sec.negative_marks, question_ids=[q.id for q in qs]))
             questions += qs
             sittings.append(sitting)
-            sources.append(src)
-        dates = [f"{sec.subject}: {d}" for sec, d in zip(bp.sections, sittings) if d]
-        note = "Held on " + ", ".join(dates) + "." if dates else ""
-        if len(set(d for d in sittings if d)) > 1:
-            note += " The papers come from different sittings of this exam."
+            real_total += real
+            if real < sec.questions:
+                notes.append(f"{sec.subject}: {real} of {sec.questions} questions are from the actual paper"
+                             + (f" ({why})" if why else "") + f"; {sec.questions - real} are practice questions written in its pattern.")
+        total = len(questions)
+        if real_total == 0:
+            spec = spec.model_copy(update={"title": f"{spec.title} · pattern practice"})
+            note = (f"The {spec.year} paper could not be found. All {total} questions are practice questions written in the "
+                    f"pattern of the {spec.year} paper - none are from the actual paper.")
+        else:
+            dates = [f"{sec.subject} held on {d}" for sec, d in zip(bp.sections, sittings) if d]
+            note = (f"{real_total} of {total} questions are from the actual {spec.year} paper" + (f" ({', '.join(dates)})" if dates else "")
+                    + ", with the official answers.")
+            if notes:
+                note += " " + " ".join(notes) + " Practice questions are marked."
+            if len(set(d for d in sittings if d)) > 1:
+                note += " The papers come from different sittings of this exam."
         minutes = bp.duration_minutes
     else:
         secs = [bp.section(spec.subject)] if spec.kind == "subject" else bp.sections

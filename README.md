@@ -150,7 +150,11 @@ The same question is the first Telegram quiz poll, tagged `[RPSC SI 2021]`. The 
 
 The **Test series** tab builds a complete test series for any exam, as a funnel:
 
-1. **Previous-year papers**: the agent searches the web for each year's paper, then opens the pages and PDFs it finds (official answer keys and sites that reproduce the full paper) and copies the questions with their official answers. It does not rely on search snippets. PDFs are read with `pdftotext`, which is included in the Docker image; only public web addresses are fetched. Hints and explanations are written afterwards. A year that can't be found is marked "not found" and skipped; click retry in the panel to try it again. If only part of a paper can be verified, the test says so (for example "62 of 100 questions"), and its time is scaled to match.
+1. **Previous-year papers**: the actual papers of recent years. The agent runs two searches (English and Hindi) and opens the pages and PDFs it finds: official question papers and answer keys, and sites that reproduce the full paper. Scanned PDFs are read page by page with a vision model, and PDFs are read with `pdftotext`, which is included in the Docker image. Only public web addresses are fetched.
+   - **Real questions** come from **one copy of one sitting**, never pieced together from several, with **that paper's official answers**. A copy whose answers don't match its questions (for example a key from another booklet series or shift) is rejected. Where our checker disagrees with an official answer, the official answer stays and the question is flagged in the panel for review.
+   - **If the paper can't be found complete**, the rest is filled with practice questions written in that paper's pattern. Each one is marked *"Practice question – not from the actual 2026 paper"* in the online test, the PDFs and the panel, and the test's note says exactly how many questions are real.
+   - **If nothing can be found**, the test is titled *"… · pattern practice"* and says that none of its questions are from the actual paper.
+   - The conducting body's own site is the best source because its key matches its uploaded paper. Some, like RPSC's, only answer from Indian networks, so run the server in India.
 2. **Subject-wise tests**: one subject at a time, with that subject's real topic mix.
 3. **Full-length mock tests**: built exactly like the real paper, with the same sections, number of questions, marks, negative marking and time.
 

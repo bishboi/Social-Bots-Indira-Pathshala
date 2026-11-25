@@ -40,6 +40,7 @@
   .stem { white-space: pre-line; }
   .stem b { margin-right: 4px; }
   .ref { font-size: 8pt; color: var(--muted); }
+  .ref.practice { color: #b35c00; font-weight: 700; }
   .fig { text-align: center; margin: 5px 0; }
   .fig img { max-width: 105mm; max-height: 70mm; }
   .opts { margin: 3px 0 0 16px; }
@@ -86,7 +87,7 @@
 <h2>{{ sec.subject }} <small>· {{ items | length }} questions · {{ '%g' % sec.marks_per_question }} marks each{% if sec.negative_marks %} · −{{ '%g' % sec.negative_marks }} for a wrong answer{% endif %}</small></h2>
 {% for n, q in items %}
 <div class="q">
-  <div class="stem"><b>{{ n }}.</b>{{ q.question }}{% if q.pyq_reference %} <span class="ref">[{{ q.pyq_reference }}]</span>{% endif %}</div>
+  <div class="stem"><b>{{ n }}.</b>{{ q.question }}{% if q.practice %} <span class="ref practice">[{{ practice_label }}]</span>{% elif q.pyq_reference %} <span class="ref">[{{ q.pyq_reference }}]</span>{% endif %}</div>
   {% if q.svg %}<div class="fig"><img src="{{ svg_uri(q.svg) }}"></div>{% endif %}
   <div class="opts">{% for o in q.options %}<div class="{{ 'right' if mode == 'solutions' and loop.index0 == q.correct_index else '' }}">({{ letters[loop.index0] }}) {{ o }}{% if mode == 'solutions' and loop.index0 == q.correct_index %} ✔{% endif %}</div>{% endfor %}</div>
   {% if mode == 'solutions' %}<div class="sol">{% if q.hint %}<span class="h">{{ t.get('hint', 'Hint') }}</span>{{ q.hint }}

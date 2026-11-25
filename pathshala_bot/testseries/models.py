@@ -149,6 +149,7 @@ class Question(BaseModel):
     pyq_reference: str = ""
     source_url: str = ""
     flagged: str = ""  # verifier disagreement kept for review (PYQs keep the official key)
+    practice: bool = False  # in a past paper: written to fill a gap, NOT from the actual paper
 
 
 class TestSection(BaseModel):

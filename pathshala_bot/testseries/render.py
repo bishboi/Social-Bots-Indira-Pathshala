@@ -48,6 +48,8 @@ def context(test: Test, exam: Exam, bp: Blueprint | None) -> dict:
         logo_url=settings.brand_logo.resolve().as_uri() if settings.brand_logo.exists() else None,
         watermark=settings.pdf_watermark, year=date.today().year, owner=settings.copyright_owner or settings.brand_name,
         instructions=(bp.instructions if bp else []), total=n,
+        practice_label=(f"अभ्यास प्रश्न - {test.year} के मूल पेपर से नहीं" if test.language == "hi"
+                        else f"Practice question - not from the actual {test.year} paper"),
     )
 
 

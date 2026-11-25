@@ -154,10 +154,6 @@ COMPLETE = 0.95  # a past paper needs this share of its questions (the rest: que
 MAX_KEY_DISAGREEMENT = 0.35
 
 
-class PaperNotFound(RuntimeError):
-    """No complete copy of a past paper with its official answers could be found."""
-
-
 def _sitting(text: str) -> str:
     """'13-09-2021' from a date in any common numeric format ('' if none)."""
     m = re.search(r"(\d{1,2})[-./ ](\d{1,2})[-./ ](\d{4})", text or "")
@@ -165,11 +161,12 @@ def _sitting(text: str) -> str:
 
 
 def find_pyqs(exam: Exam, bp: Blueprint, section: Section, year: str, language: str,
-              prefer_sitting: str = "") -> tuple[list[QuestionDraft], str, str]:
-    """One complete section of a real <year> paper, from ONE document, with that paper's official answers.
+              prefer_sitting: str = "") -> tuple[list[QuestionDraft], str, str, str]:
+    """A section of a real <year> paper, from ONE document, with that paper's official answers.
 
-    Returns (questions in paper order, sitting date, source URL). Raises PaperNotFound when no single source has the
-    complete section with answers that belong to it. prefer_sitting: the date of the other paper(s) of this test."""
+    Returns (questions in paper order, sitting date, source URL, note). The most complete copy whose answers belong
+    to its questions wins; it may be incomplete (note says why) - the caller fills the gap with labelled practice
+    questions. Nothing usable: ([], "", "", reason). prefer_sitting: date of the other paper(s) of this test."""
     from .. import llm
     from . import sources as web
 
@@ -181,9 +178,14 @@ question paper and answer key PDFs first, then reputable sites that reproduce th
 List every such URL on its own line under "URLS:" (direct PDF links are best), most complete first, and say for each what
 it contains and the exam date/shift. If the paper of {year} was never held or isn't published anywhere, say NO PAPER FOUND.""",
                                 settings.max_web_searches)
-    named = re.findall(r"https?://[^\s<>\"')\]]+", research.notes)  # the URLs research names as the paper come first
-    urls = named + [s["url"] for s in research.sources]
-    found = web.gather(urls, limit=6, keyword=f"{section.subject} {year}")
+    # a second search in the paper's own terms finds copies the first one misses (Hindi coaching sites, PDF archives)
+    research2 = llm.web_research(f"""Search for the complete {exam.short_name} {year} "{section.subject}" question paper with its answer key,
+in Hindi and English (e.g. "{exam.short_name} {year} प्रश्न पत्र उत्तर कुंजी सहित", "{exam.short_name} {year} paper pdf with answer key",
+"{exam.short_name} {year} solved paper"), including direct PDF links and pages that show all questions with answers.
+List each URL on its own line under "URLS:" with what it contains (complete or partial, date/shift).""", settings.max_web_searches)
+    named = re.findall(r"https?://[^\s<>\"')\]]+", research.notes + "\n" + research2.notes)  # URLs research names as the paper come first
+    urls = named + [s["url"] for s in research.sources + research2.sources]
+    found = web.gather(urls, limit=8, attempts=30, keyword=f"{section.subject} {year}")
     topics = ", ".join(t.topic for t in section.topics)
     rules = f"""- Only questions of the section/paper "{section.subject}" of {exam.name} {year}. If the material belongs to another
   exam, year or paper, return an empty list. Never add, invent, complete or re-word questions.
@@ -239,7 +241,7 @@ it contains and the exam date/shift. If the paper of {year} was never held or is
             for q in qs:
                 q.source_url = chunk[0]
                 candidates.setdefault(chunk[0], []).append(q)
-    for url, pdf in (found.scanned[:3] if found.keys else []):
+    for url, pdf in (found.scanned[:4] if found.keys else []):
         pages = web.page_images(pdf)
         jobs = [(url, pages[i:i + 3], i) for i in range(0, len(pages), 3)]
         with ThreadPoolExecutor(PARALLEL) as pool:
@@ -258,10 +260,6 @@ it contains and the exam date/shift. If the paper of {year} was never held or is
         ranked.append((len(qs) >= need, bool(prefer_sitting) and sitting == prefer_sitting, len(qs), url, qs, sitting))
     ranked.sort(key=lambda r: (r[0], r[1], r[2]), reverse=True)
     for complete, _, n, url, qs, sitting in ranked:
-        if not complete:
-            if reason.startswith("no copy"):
-                reason = f"the most complete copy found has {n} of {section.questions} questions ({url})"
-            break
         if not trusted(exam, qs, language):  # answers from another booklet / shift / paper
             reason = f"the answers in {url} don't belong to its questions"
             continue
@@ -276,11 +274,10 @@ it contains and the exam date/shift. If the paper of {year} was never held or is
             missing = [i for i, d in enumerate(out) if not d.solution]
             for i, h in zip(missing, explain(exam, [qs[i] for i in missing], language)):
                 out[i].hint, out[i].solution, out[i].explanation = h
-        if any(not d.solution for d in out):
-            reason = "explanations could not be written for every question"
-            continue
-        return out, sitting, url
-    raise PaperNotFound(f"{section.subject}: {reason}")
+        out = [d for d in out if d.solution]
+        note = "" if len(out) >= need else f"the most complete copy found has {len(out)} of {section.questions} questions"
+        return out, sitting, url, note
+    return [], "", "", reason
 
 
 def _paper_order(qs: list) -> list:
@@ -483,16 +480,38 @@ def _scale(difficulty: dict[str, int], n: int) -> dict[str, int]:
 
 
 def build_pyq_section(exam: Exam, bp: Blueprint, section: Section, year: str, language: str, diagrams_on: bool,
-                      progress=None, prefer_sitting: str = "") -> tuple[list[Question], str, str]:
-    """A complete section of a real past paper: (questions, sitting date, source). Raises PaperNotFound."""
+                      progress=None, prefer_sitting: str = "", focus: str = "") -> tuple[list[Question], str, str, int]:
+    """A section of a real past paper: (questions, sitting date, note, real count).
+
+    Real questions keep their official answers (a checker disagreement is flagged for review). Questions that couldn't
+    be found are written in the paper's pattern and marked practice=True - never passed off as the real paper."""
     if progress:
         progress(f"{year} paper · {section.subject}: searching the web")
-    drafts, sitting, source = find_pyqs(exam, bp, section, year, language, prefer_sitting)
-    problems = check(exam, drafts, language)
-    svgs = draw_figures(drafts, language) if diagrams_on else [""] * len(drafts)
-    out = []
+    drafts, sitting, source, note = find_pyqs(exam, bp, section, year, language, prefer_sitting)
+    problems = check(exam, drafts, language) if drafts else []
+    svgs = draw_figures(drafts, language) if diagrams_on and drafts else [""] * len(drafts)
+    real = []
     for d, prob, svg in zip(drafts, problems, svgs):
         if d.needs_diagram and not svg:
-            raise PaperNotFound(f"{section.subject}: the figure of a question could not be drawn")  # never drop part of a paper
-        out.append(to_question(d, section.subject, svg, flagged=prob))  # official answer kept; a disagreement is flagged
-    return out, sitting, source
+            continue  # its figure couldn't be drawn: a practice question takes its place
+        real.append(to_question(d, section.subject, svg, flagged=prob))
+    real = real[: section.questions]
+    missing = section.questions - len(real)
+    practice: list[Question] = []
+    if missing > 0:
+        if progress:
+            progress(f"{year} paper · {section.subject}: {len(real)} real question(s) found, writing {missing} practice question(s)")
+        from .blueprint import difficulty_split, topic_plan
+
+        have: dict[str, int] = {}
+        for q in real:
+            have[q.topic] = have.get(q.topic, 0) + 1
+        plan = [(t, n - have.get(t, 0)) for t, n in topic_plan(section, section.questions) if n - have.get(t, 0) > 0]
+        if sum(n for _, n in plan) < missing:
+            plan = topic_plan(section, missing)
+        practice = build_section(exam, bp, section, plan, difficulty_split(bp, missing), language,
+                                 [q.question for q in real], diagrams_on, focus, progress)[:missing]
+        for q in practice:
+            q.practice = True
+    reason = note or ("" if real else "the paper could not be found")
+    return real + practice, sitting, reason, len(real)

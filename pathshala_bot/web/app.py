@@ -238,6 +238,7 @@ def create_app(with_bot: bool = True) -> FastAPI:
                              "minutes": t.duration_minutes if t else None, "access": t.access if t else spec.access,
                              "note": t.note if t else skip.get(spec.id, ""), "skipped": spec.id in skip, "flagged": sum(1 for q in t.questions if q.flagged) if t else 0,
                              "figures": sum(1 for q in t.questions if q.svg) if t else 0,
+                             "practice": sum(1 for q in t.questions if q.practice) if t else 0,
                              "published": (t.published or {}).get("at") if t else None,
                              "files": [n for n in ("paper.pdf", "solutions.pdf") if t and (tsb.test_dir(ts.id, t.id) / n).exists()],
                              "url": tsb.test_url(ts.id, spec.id), **(stats["tests"].get(spec.id) or {})})
