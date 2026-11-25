@@ -150,7 +150,7 @@ The same question is the first Telegram quiz poll, tagged `[RPSC SI 2021]`. The 
 
 The **Test series** tab builds a complete test series for any exam, as a funnel:
 
-1. **Previous-year papers**: the agent finds the real question papers of recent years on the web, section by section, using the official answer keys. If only part of a paper can be verified, the test says so (for example "62 of 100 questions"), and its time is scaled to match.
+1. **Previous-year papers**: the agent searches the web for each year's paper, then opens the pages and PDFs it finds (official answer keys and sites that reproduce the full paper) and copies the questions with their official answers. It does not rely on search snippets. PDFs are read with `pdftotext`, which is included in the Docker image; only public web addresses are fetched. Hints and explanations are written afterwards. A year that can't be found is marked "not found" and skipped; click retry in the panel to try it again. If only part of a paper can be verified, the test says so (for example "62 of 100 questions"), and its time is scaled to match.
 2. **Subject-wise tests**: one subject at a time, with that subject's real topic mix.
 3. **Full-length mock tests**: built exactly like the real paper, with the same sections, number of questions, marks, negative marking and time.
 

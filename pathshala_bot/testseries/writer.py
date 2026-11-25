@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ..config import Exam, settings
 from . import diagrams
 from .blueprint import allocate
-from .models import Blueprint, Question, QuestionBatch, QuestionDraft, Section, Verdicts
+from .models import Blueprint, PaperQuestions, Question, QuestionBatch, QuestionDraft, Section, Verdicts
 
 log = logging.getLogger(__name__)
 
@@ -150,49 +150,109 @@ def _closest(topic: str, topics: list[str]) -> str | None:
 
 
 def find_pyqs(exam: Exam, bp: Blueprint, section: Section, year: str, language: str) -> list[QuestionDraft]:
-    """Real questions of one section of the <year> paper, from the web. Only what could be verified."""
+    """Real questions of one section of the <year> paper: search, read the paper / answer-key pages, copy, then explain."""
     from .. import llm
+    from . import sources as web
 
-    research = llm.web_research(f"""Find the ACTUAL questions of the {exam.name} {year} question paper, section "{section.subject}"
-({section.questions} questions in the paper).
-
-Search for the official question paper / answer key PDF of {year} (conducting body's website first), or reputable archives
-that reproduce the paper with the official answer key. Record as many questions of this section as you can find, VERBATIM:
-the stem, all options in order, the OFFICIAL answer, and the URL. Note the shift/date if the exam had several.
-Do not make up or "reconstruct" questions; if you cannot find the paper, say NO PAPER FOUND.
-Reply with the questions as a numbered list, in the paper's language.""", settings.max_web_searches)
-    if "NO PAPER FOUND" in research.notes and len(research.notes) < 400:
+    research = llm.web_research(f"""Find where the ACTUAL questions of the {exam.name} {year} question paper, section/paper
+"{section.subject}", are published in full with answers: the official question paper and answer key PDFs (conducting
+body's website first), and reputable sites that reproduce the complete paper with the official answer key (e.g. pages titled
+"{exam.short_name} {year} question paper with answer key", "{year} solved paper").
+List every such URL on its own line under "URLS:" (direct PDF links are best), most complete first, and say for each what
+it contains. Note the exam date/shift. If the paper of {year} was never held or isn't published anywhere, say NO PAPER FOUND.""",
+                                settings.max_web_searches)
+    urls = [s["url"] for s in research.sources] + re.findall(r"https?://[^\s<>\"')\]]+", research.notes)
+    docs = web.gather(urls, limit=6)
+    log.info("%s %s %s: read %d of %d source(s)", exam.short_name, year, section.subject, len(docs), len(set(urls)))
+    if not docs:
         return []
-    srcs = "\n".join(f"- {s['title']} - {s['url']}" for s in research.sources[:20])
-    out = llm.structured(
-        f"""You copy real previous-year questions from research notes into structured form.
-- Only questions that the notes give with all options and an answer. Never add, invent or complete questions.
+    chunks: list[tuple[str, str]] = []
+    for url, text in docs:
+        for i in range(0, len(text), 18000):
+            chunks.append((url, text[i:i + 18000]))
+    chunks = chunks[:14]
+    topics = ", ".join(t.topic for t in section.topics)
+
+    def extract(chunk: tuple[str, str]):
+        url, text = chunk
+        try:
+            return llm.structured(
+                f"""You copy real previous-year questions of {exam.name} {year} from a document into structured form.
+- Only questions of the section/paper "{section.subject}" that the document gives WITH all options and an answer
+  (answer key, marked answer or "Ans:"). Never add, invent, complete or re-word questions.
+- If the document belongs to another exam or year, or has no questions with answers, return an empty list.
 - Keep the wording; translate only if the paper's language differs: {_lang(language)}
-- options: exactly as in the paper (drop 'A)' prefixes); correct_index from the official answer key.
-- pyq_reference: '{exam.short_name} {year}' plus the shift if known. source_url: where it was found.
-- topic: the closest of these topics: {', '.join(t.topic for t in section.topics)}.
-- For each, write a hint (a nudge towards the concept or first step that does not give the answer away), a short
-  solution, and a detailed explanation: the concept, the full working, why each wrong option is wrong, and a related fact
-  or common trap. needs_diagram true only if the original question has a figure; then describe it
-  in diagram_brief exactly as in the paper.""",
-        f"Exam: {exam.name} {year}, section {section.subject}\n\nRESEARCH NOTES\n{research.notes}\n\nSOURCES\n{srcs}",
-        QuestionBatch, max_tokens=32000, effort="low")
+- options exactly as in the paper (drop 'A)' prefixes); correct_index from the key.
+- pyq_reference '{exam.short_name} {year}' (+ shift/date if given); source_url: {url}
+- topic: the closest of: {topics}.
+- needs_diagram only if the question has a figure; then describe it exactly in diagram_brief.""",
+                f"DOCUMENT ({url}):\n{text}", PaperQuestions, max_tokens=24000, effort="low").questions
+        except Exception:
+            log.exception("PYQ extraction failed for %s", url)
+            return []
+
+    with ThreadPoolExecutor(PARALLEL) as pool:
+        found = [q for qs in pool.map(extract, chunks) for q in qs]
     seen: list[str] = []
-    keep = []
-    for d in out.questions:
-        if not valid(d, len(d.options)) or len(d.options) < 2 or is_duplicate(d.question, seen):
+    raw = []
+    for q in found:
+        opts = [o.strip() for o in q.options]
+        if len(opts) < 2 or not all(opts) or not 0 <= q.correct_index < len(opts) or is_duplicate(q.question, seen):
             continue
-        d.pyq_reference = d.pyq_reference.strip() or f"{exam.short_name} {year}"
-        seen.append(_norm(d.question))
-        keep.append(d)
-    return keep[: section.questions]
+        seen.append(_norm(q.question))
+        raw.append(q)
+    raw = raw[: section.questions]
+    if not raw:
+        return []
+    helps = explain(exam, raw, language)
+    out = []
+    for q, h in zip(raw, helps):
+        out.append(QuestionDraft(topic=q.topic, question=q.question.strip(), options=[o.strip() for o in q.options],
+                                 correct_index=q.correct_index, hint=h[0], solution=h[1], explanation=h[2],
+                                 difficulty="medium", needs_diagram=q.needs_diagram, diagram_brief=q.diagram_brief,
+                                 pyq_reference=q.pyq_reference.strip() or f"{exam.short_name} {year}", source_url=q.source_url))
+    return [d for d in out if d.solution]
+
+
+def explain(exam: Exam, questions, language: str) -> list[tuple[str, str, str]]:
+    """(hint, solution, explanation) for each question, written in batches."""
+    from .. import llm
+    from .models import HelpBatch
+
+    out: list[tuple[str, str, str]] = [("", "", "")] * len(questions)
+
+    def one(start: int) -> None:
+        chunk = questions[start:start + BATCH]
+        listing = "\n\n".join(f"Q{i + 1}. {q.question}\n" + "\n".join(f"  ({j}) {o}" for j, o in enumerate(q.options))
+                               + f"\n  Correct (official key): ({q.correct_index}) {q.options[q.correct_index]}" for i, q in enumerate(chunk))
+        try:
+            res = llm.structured(
+                f"""You are a senior teacher for {exam.name}. For each question write, in the content language:
+- hint: a nudge towards the concept, rule or first step - never the answer, never an option letter;
+- solution: the answer with the key steps, short;
+- explanation: a detailed lesson - the concept, full working, why EACH wrong option is wrong, and a related fact,
+  shortcut or common trap. Explain the official answer.
+{_lang(language)}""", listing, HelpBatch, max_tokens=32000, effort="medium")
+        except Exception:
+            log.exception("explanations failed for a batch")
+            return
+        for h in res.items:
+            if 1 <= h.number <= len(chunk):
+                out[start + h.number - 1] = (h.hint.strip(), h.solution.strip(), h.explanation.strip())
+
+    with ThreadPoolExecutor(PARALLEL) as pool:
+        list(pool.map(one, range(0, len(questions), BATCH)))
+    return out
 
 
 def check(exam: Exam, drafts: list[QuestionDraft], language: str) -> list[str]:
-    """Problems per question ('' = sound), from an independent solve without the key."""
+    """Problems per question ('' = sound), from an independent solve without the key.
+
+    A hint that gives the answer away is rewritten in place (the question itself is fine)."""
     from .. import llm
 
     problems = [""] * len(drafts)
+    weak_hints: list[int] = []
 
     def one(start: int) -> None:
         chunk = drafts[start:start + CHECK_BATCH]
@@ -204,9 +264,10 @@ def check(exam: Exam, drafts: list[QuestionDraft], language: str) -> list[str]:
         try:
             res = llm.structured(
                 f"You are an expert examiner for {exam.name}. Solve each question yourself, carefully, without guessing: "
-                "work numericals out fully and recall facts precisely. Give the 0-based index of the correct option and report "
-                "any problem (no correct option, two correct options, ambiguity, outdated or wrong fact, missing data, "
-                "or a hint that gives the answer away).",
+                "work numericals out fully and recall facts precisely. Give the 0-based index of the correct option. In 'problem' "
+                "report only real defects (wrong key, no correct option, two defensible correct options, outdated or wrong fact, "
+                "missing data) - leave it empty for a sound question, even if the wording could be nicer. Judge the hint separately "
+                "in 'hint_reveals'.",
                 f"Questions (language: {language}):\n\n{listing}", Verdicts, max_tokens=16000, effort="medium")
         except Exception:
             log.exception("checker failed; batch accepted unchecked")
@@ -220,10 +281,33 @@ def check(exam: Exam, drafts: list[QuestionDraft], language: str) -> list[str]:
                 problems[start + i] = f"checker chose option {v.answer_index + 1}, key says {d.correct_index + 1}. {v.problem}".strip()
             elif v.problem.strip():
                 problems[start + i] = v.problem.strip()
+            elif v.hint_reveals:
+                weak_hints.append(start + i)
 
     with ThreadPoolExecutor(PARALLEL) as pool:
         list(pool.map(one, range(0, len(drafts), CHECK_BATCH)))
+    if weak_hints:
+        rewrite_hints(exam, [drafts[i] for i in weak_hints], language)
     return problems
+
+
+def rewrite_hints(exam: Exam, drafts: list[QuestionDraft], language: str) -> None:
+    """New hints for questions whose hint gave the answer away (no hint is better than a spoiler)."""
+    from .. import llm
+    from .models import HintBatch
+
+    listing = "\n\n".join(f"Q{i + 1}. {d.question}\n" + "\n".join(f"  ({j}) {o}" for j, o in enumerate(d.options))
+                           + f"\n  Answer: ({d.correct_index}). Old hint (too revealing): {d.hint}" for i, d in enumerate(drafts))
+    new: dict[int, str] = {}
+    try:
+        res = llm.structured(f"You write hints for {exam.name} practice questions. A hint points to the concept, rule or first "
+                             f"step to think of; it never gives the answer, names an option or rules options out. {_lang(language)}",
+                             listing, HintBatch, max_tokens=8000, effort="low")
+        new = {h.number: h.hint.strip() for h in res.items}
+    except Exception:
+        log.exception("hint rewrite failed")
+    for i, d in enumerate(drafts):
+        d.hint = new.get(i + 1, "")
 
 
 def draw_figures(drafts: list[QuestionDraft], language: str) -> list[str]:

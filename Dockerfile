@@ -3,7 +3,7 @@ FROM python:3.12-slim
 # ffmpeg: video; Pango/Cairo: WeasyPrint PDFs + Manim text (HarfBuzz shaping for Hindi);
 # LaTeX + dvisvgm: Manim formula rendering (JEE/NEET formula reels)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg fontconfig build-essential pkg-config \
+        ffmpeg fontconfig build-essential pkg-config poppler-utils \
         libcairo2-dev libpango1.0-dev libharfbuzz0b \
         texlive-latex-base texlive-latex-recommended texlive-fonts-recommended dvisvgm \
     && rm -rf /var/lib/apt/lists/*

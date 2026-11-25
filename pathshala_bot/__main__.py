@@ -116,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         what = "blueprint" if a.blueprint else ("all" if a.all else "next")
         print(builder.run(cfg, t, what=what, dry_run=a.dry_run, progress=lambda m: print("  ·", m)))
+        from .providers import OpenRouterProvider
+
+        if OpenRouterProvider.spent:
+            print(f"OpenRouter cost of this run: ${OpenRouterProvider.spent:.2f}")
         return 0
     if a.cmd == "spaces":
         from . import control

@@ -96,7 +96,7 @@ def test_build_section_rewrites_what_the_checker_rejects(ctl, monkeypatch):
         calls["check"] += 1
         n = user.count("\nQ") + 1
         # first check: the checker disagrees with question 1
-        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=(0 if (i == 0 and calls["check"] == 1) else 1), problem="")
+        return Verdicts(verdicts=[Verdict(number=i + 1, answer_index=(0 if (i == 0 and calls["check"] == 1) else 1), problem="", hint_reveals=False)
                                   for i in range(n)])
 
     monkeypatch.setattr(llm, "structured", fake_structured)
@@ -232,24 +232,44 @@ def test_phone_numbers():
 
 
 def test_pyq_paper_keeps_official_key_and_flags_disagreement(ctl, monkeypatch):
+    from pathshala_bot.testseries import sources
+    from pathshala_bot.testseries.models import Help, HelpBatch, PaperQuestion, PaperQuestions
+
     cfg, ts = _series_cfg(ctl)
     bp = make_bp()
-    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(notes="Q1 ... answer (b)", sources=[{"title": "RPSC", "url": "https://rpsc.example/2021.pdf"}]))
+    monkeypatch.setattr(llm, "web_research", lambda prompt, n: Research(
+        notes="URLS:\nhttps://rpsc.example/2021.pdf - full paper", sources=[{"title": "RPSC", "url": "https://rpsc.example/2021.pdf"}]))
+    fetched = []
+    monkeypatch.setattr(sources, "gather", lambda urls, limit=6: fetched.append(urls) or [("https://rpsc.example/2021.pdf", "1. Q ... Ans (b) " * 100)])
 
     def fake_structured(system, user, model, **kw):
-        if model is QuestionBatch:
-            sec = "Hindi" if "section Hindi" in user else "Reasoning"
+        if model is PaperQuestions:
+            sec = "Hindi" if '"Hindi"' in system else "Reasoning"
             d = _draft("Sandhi" if sec == "Hindi" else "Series", 1 if sec == "Hindi" else 2)
-            d.pyq_reference, d.source_url = "", "https://rpsc.example/2021.pdf"
-            return QuestionBatch(questions=[d])
-        return Verdicts(verdicts=[Verdict(number=1, answer_index=3, problem="")])
+            return PaperQuestions(questions=[PaperQuestion(topic=d.topic, question=d.question, options=d.options, correct_index=1,
+                                                           needs_diagram=False, diagram_brief="", pyq_reference="",
+                                                           source_url="https://rpsc.example/2021.pdf")])
+        if model is HelpBatch:
+            assert "official key" in user
+            return HelpBatch(items=[Help(number=1, hint="h", solution="s", explanation="e")])
+        return Verdicts(verdicts=[Verdict(number=1, answer_index=3, problem="", hint_reveals=False)])
 
     monkeypatch.setattr(llm, "structured", fake_structured)
     spec = builder.plan(ts, bp)[0]
     test = builder.build_test(cfg, ts, spec, bp)
-    assert len(test.questions) == 2 and test.questions[0].correct_index == 1  # official key kept
-    assert "checker chose option 4" in test.questions[0].flagged and test.questions[0].pyq_reference == "Rajasthan SI 2021"
+    assert "https://rpsc.example/2021.pdf" in fetched[0]  # the paper itself is read, not just search snippets
+    q = test.questions[0]
+    assert len(test.questions) == 2 and q.correct_index == 1 and (q.hint, q.solution, q.explanation) == ("h", "s", "e")  # official key kept
+    assert "checker chose option 4" in q.flagged and q.pyq_reference == "Rajasthan SI 2021"
     assert "2 of 16" in test.note and test.duration_minutes == bpm.scaled_minutes(bp, 2)
+
+
+def test_only_public_urls_are_fetched():
+    from pathshala_bot.testseries import sources
+
+    assert not sources.public_url("http://127.0.0.1/admin") and not sources.public_url("http://10.0.0.5/x")
+    assert not sources.public_url("file:///etc/passwd") and not sources.public_url("http://localhost:8080/")
+    assert "Q1. Which" in sources.html_text("<html><script>x()</script><p>Q1. Which&nbsp;fort?</p></html>")
 
 
 def test_run_builds_next_and_reports(ctl, monkeypatch):
@@ -290,3 +310,22 @@ def test_missing_paper_is_skipped_not_blocking(ctl, monkeypatch):
     assert [ln[0] for ln in lines] == ["⏭", "⏭", "✅"] and set(builder.skipped("si")) == {"pyq-2021", "pyq-2018"}
     assert builder.next_spec(ts, make_bp()).id == "subject-reasoning-1"
     assert builder.delete_test("si", "pyq-2021") and "pyq-2021" not in builder.skipped("si")  # retry
+
+
+def test_revealing_hint_is_rewritten_not_rejected(monkeypatch):
+    from pathshala_bot.config import load_exams
+    from pathshala_bot.testseries.models import HintBatch, NewHint
+
+    drafts = [_draft("Sandhi", 1), _draft("Sandhi", 2)]
+    drafts[1].hint = "the answer is opt 2 b"
+
+    def fake(system, user, model, **kw):
+        if model is Verdicts:
+            return Verdicts(verdicts=[Verdict(number=1, answer_index=1, problem="", hint_reveals=False),
+                                      Verdict(number=2, answer_index=1, problem="", hint_reveals=True)])
+        assert model is HintBatch and "too revealing" in user and "opt 2 b" in user
+        return HintBatch(items=[NewHint(number=1, hint="recall the rule for vowel sandhi")])
+
+    monkeypatch.setattr(llm, "structured", fake)
+    assert writer.check(load_exams()["rajasthan-si"], drafts, "hi") == ["", ""]  # both kept
+    assert drafts[0].hint == "think about Sandhi" and drafts[1].hint == "recall the rule for vowel sandhi"

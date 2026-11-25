@@ -81,10 +81,48 @@ class QuestionBatch(BaseModel):
     questions: list[QuestionDraft]
 
 
+class PaperQuestion(BaseModel):
+    """A question copied from a real past paper (help text is written afterwards)."""
+
+    topic: str = Field(description="The closest topic from the list given.")
+    question: str = Field(description="The question exactly as in the paper (translated only if the paper's language differs).")
+    options: list[str] = Field(description="The options exactly as in the paper, no 'A)' prefixes.")
+    correct_index: int = Field(description="0-based index of the correct option per the official answer key (or the source's key).")
+    needs_diagram: bool = Field(description="True only if the original question has a figure.")
+    diagram_brief: str = Field(description="If needs_diagram: the figure exactly as in the paper, precisely described. Else empty.")
+    pyq_reference: str = Field(description="'<exam> <year>' plus shift/date if known.")
+    source_url: str = Field(description="URL of the document the question was copied from.")
+
+
+class PaperQuestions(BaseModel):
+    questions: list[PaperQuestion]
+
+
+class Help(BaseModel):
+    number: int = Field(description="The question's number in the list.")
+    hint: str = Field(description="A nudge towards the concept or first step, max 200 characters; never the answer.")
+    solution: str = Field(description="The answer with the key steps, max 500 characters.")
+    explanation: str = Field(description="Detailed explanation, max 1800 characters: the concept, full working, why EACH wrong option is wrong, a related fact or common trap.")
+
+
+class HelpBatch(BaseModel):
+    items: list[Help]
+
+
+class NewHint(BaseModel):
+    number: int
+    hint: str = Field(description="A nudge towards the concept, rule or first step, max 200 characters. It must not give away the answer, name an option or rule options out.")
+
+
+class HintBatch(BaseModel):
+    items: list[NewHint]
+
+
 class Verdict(BaseModel):
     number: int = Field(description="The question's number in the list.")
     answer_index: int = Field(description="0-based index of the option YOU find correct (-1 if no option is correct).")
-    problem: str = Field(description="Empty if the question is sound. Else the problem: wrong key, two correct options, ambiguous, factual error, missing data, needs a figure that is not described.")
+    problem: str = Field(description="Empty if the question is sound. Else ONLY a defect that makes it unfit for a real exam: wrong key, no correct option, two defensible correct options, factual error, missing data, a figure that is not described. Not style remarks, not hint issues.")
+    hint_reveals: bool = Field(description="True if the hint shown to students gives the answer away or names/eliminates options.")
 
 
 class Verdicts(BaseModel):
